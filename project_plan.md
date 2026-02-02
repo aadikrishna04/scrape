@@ -2,6 +2,45 @@ You are an expert full-stack developer building a prototype web app called "Prom
 
 This is an MVP for a VC demo tomorrow, so prioritize a polished, usable core loop: Auth → Create Project → Chat to Prompt Workflow → Visualize & Run. It doesn't need full scalability or edge cases, but it must be deployable (Vercel for frontend, Render/Heroku for backend) and impressive: Clean UI, smooth interactions, dummy data for runs. Focus on making it feel magical — chat responses that anticipate needs, seamless generation, "wow" moments like instant graph updates. 80/20 rule — core chat-to-workflow magic shines with 2-3 example workflows (e.g., scraping + posting).
 
+**Phase 4: Browser Use MCP Integration (Agentic Execution Engine)**
+
+**Architecture Shift**: Instead of predefined node handlers, workflows execute via a Browser Agent that uses Gemini + Browser MCP to perform any web-based task.
+
+**User Experience**: Users describe workflows naturally ("Scrape Nasdaq earnings daily and email me"). The AI:
+1. Translates intent into a visual graph (scraper node → email node)
+2. Executes by actually using a browser to navigate, extract, and send
+3. Returns results with execution logs (screenshots, actions taken)
+
+**Technical Implementation**:
+- **MCP Server**: Exposes browser tools (`navigate`, `click`, `extract`, `screenshot`, `type`)
+- **Browser Agent Node**: Single node type that receives natural language instructions
+- **Execution Flow**: Sequential node execution with context passing between steps
+- **State Management**: Each node's output feeds into next node's instruction context
+- **Monitoring**: Execution logs with screenshots for transparency/debugging
+
+**Node Types (MCP-Powered)**:
+- `browser_agent` - General purpose web automation (scraping, form filling, navigation)
+- `ai_transform` - Use Gemini to process/transform data between nodes
+- `conditional` - LLM-based decision routing
+
+**Workflow Example**:
+```json
+{
+  "nodes": [
+    { "id": "1", "type": "browser_agent", "instruction": "Go to nasdaq.com/earnings, extract today's earnings as JSON" },
+    { "id": "2", "type": "ai_transform", "instruction": "Summarize the earnings data into a brief report" },
+    { "id": "3", "type": "browser_agent", "instruction": "Log into Gmail and send the summary to user@email.com" }
+  ]
+}
+```
+
+**Trade-offs**:
+- Slower than deterministic nodes but infinitely more flexible
+- Can interact with any website without pre-built integrations
+- Natural language instructions instead of rigid configuration
+
+---
+
 **Extremely Detailed Functionality & User Flow (Implement to Feel Magical, From User POV):**
 The app should feel like a seamless, intelligent assistant — users chat naturally, and everything happens magically without friction. UI is sleek, modern, professional: Inspired by Okta/Auth0 (clean whites/blues/grays, minimalistic forms, secure vibe with subtle shadows/gradients, microanimations when deemed fit, responsive mobile-first). Do not make generic AI slop cards. In general with design choices, try to be unique and sleek. No clutter — focused on chat and graph. Loading states with smooth spinners/toasts ("Building magically..."). Errors as friendly nudges ("Hmm, let's try that again — what details can I add?").
 
