@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import ReactMarkdown from 'react-markdown'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -18,9 +19,10 @@ interface Message {
 interface ChatPanelProps {
   projectId: string
   onWorkflowUpdate?: () => void
+  version?: number
 }
 
-export default function ChatPanel({ projectId, onWorkflowUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectId, onWorkflowUpdate, version }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -28,7 +30,7 @@ export default function ChatPanel({ projectId, onWorkflowUpdate }: ChatPanelProp
 
   useEffect(() => {
     loadHistory()
-  }, [projectId])
+  }, [projectId, version])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -111,7 +113,28 @@ export default function ChatPanel({ projectId, onWorkflowUpdate }: ChatPanelProp
                     : "bg-muted text-foreground"
                 )}
               >
-                {msg.content}
+                {msg.role === 'assistant' ? (
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                      ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                      li: ({ children }) => <li className="ml-1">{children}</li>,
+                      h1: ({ children }) => <h1 className="text-base font-bold mb-2">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-sm font-bold mb-2">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+                      code: ({ children }) => <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                      pre: ({ children }) => <pre className="bg-background/50 p-2 rounded my-2 overflow-x-auto text-xs">{children}</pre>,
+                      hr: () => <hr className="my-3 border-border" />,
+                      blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/50 pl-3 my-2 italic">{children}</blockquote>,
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                ) : (
+                  msg.content
+                )}
               </div>
             </div>
           ))

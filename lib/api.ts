@@ -42,6 +42,16 @@ export const api = {
       if (!res.ok) throw new Error('Failed to delete project')
       return res.json()
     },
+    rename: async (id: string, name: string) => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/projects/${id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ name }),
+      })
+      if (!res.ok) throw new Error('Failed to rename project')
+      return res.json()
+    },
   },
   chat: {
     send: async (projectId: string, message: string) => {

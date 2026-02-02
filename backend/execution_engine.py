@@ -3,7 +3,7 @@ Agentic Execution Engine - Executes workflows using Browser Agent nodes
 """
 from typing import Dict, Any, List
 import json
-from browser_agent import execute_browser_instruction, get_browser, close_browser
+from browser_agent import execute_browser_instruction, close_browser
 
 class WorkflowExecutor:
     """Executes agentic workflows with sequential node processing."""
@@ -80,27 +80,41 @@ class WorkflowExecutor:
                 
             elif node_type == "ai_transform":
                 # AI transformation using Gemini (simpler, no browser)
-                from browser_agent import get_gemini_llm
-                llm = get_gemini_llm()
+                import os
+                from google import genai
+                from google.genai import types
+                
+                client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
                 
                 context_str = "\n".join([f"{k}: {v}" for k, v in inputs.items()])
                 prompt = f"Context:\n{context_str}\n\nTransform/Process according to: {instruction}"
                 
-                response = await llm.ainvoke(prompt)
+                response = await client.aio.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.7)
+                )
                 result["status"] = "success"
-                result["output"] = response.content
-                self.context[node_id] = response.content
+                result["output"] = response.text
+                self.context[node_id] = response.text
                 
             elif node_type == "conditional":
                 # LLM-based conditional routing
-                from browser_agent import get_gemini_llm
-                llm = get_gemini_llm()
+                import os
+                from google import genai
+                from google.genai import types
+                
+                client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
                 
                 context_str = "\n".join([f"{k}: {v}" for k, v in inputs.items()])
                 prompt = f"Context:\n{context_str}\n\nDecision: {instruction}\n\nRespond with ONLY 'true' or 'false'."
                 
-                response = await llm.ainvoke(prompt)
-                decision = "true" in response.content.lower()
+                response = await client.aio.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.3)
+                )
+                decision = "true" in response.text.lower()
                 
                 result["status"] = "success"
                 result["output"] = {"decision": decision}
@@ -162,8 +176,8 @@ class WorkflowExecutor:
                 "results": self.execution_log
             }
         finally:
-            # Cleanup browser if needed
-            pass
+            # Cleanup browser after each workflow execution to ensure fresh state
+            await close_browser()
 
 async def execute_workflow(workflow: Dict[str, Any]) -> Dict[str, Any]:
     """

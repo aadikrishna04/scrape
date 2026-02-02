@@ -18,23 +18,9 @@ def get_gemini_llm():
         temperature=0.1,
     )
 
-# Global browser instance (shared across executions)
-browser: Browser = None
-
-def get_browser():
-    """Get or create shared browser instance."""
-    global browser
-    if browser is None:
-        headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
-        browser = Browser(headless=headless)
-    return browser
-
 async def close_browser():
-    """Close the browser instance."""
-    global browser
-    if browser:
-        await browser.close()
-        browser = None
+    """Placeholder for compatibility - browser is now created per-execution."""
+    pass
 
 async def execute_browser_instruction(instruction: str, context: dict = None) -> dict:
     """
@@ -47,13 +33,7 @@ async def execute_browser_instruction(instruction: str, context: dict = None) ->
     Returns:
         Dict with result, logs, and any extracted data
     """
-    global browser
     llm = get_gemini_llm()
-    
-    # Ensure browser is properly initialized
-    if browser is None:
-        headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
-        browser = Browser(headless=headless)
     
     # Build context-aware instruction
     full_instruction = instruction
@@ -61,8 +41,12 @@ async def execute_browser_instruction(instruction: str, context: dict = None) ->
         context_str = "\n".join([f"{k}: {v}" for k, v in context.items()])
         full_instruction = f"Context from previous steps:\n{context_str}\n\nTask: {instruction}"
     
+    # Create fresh browser for each execution to avoid stale state
+    headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
+    browser = Browser(headless=headless)
+    
     try:
-        # Create and run agent
+        # Create and run agent with fresh browser
         agent = Agent(
             task=full_instruction,
             llm=llm,
@@ -89,17 +73,15 @@ async def execute_browser_instruction(instruction: str, context: dict = None) ->
             }
             
     except Exception as e:
-        # If browser failed, close it so it will be reinitialized next time
-        if browser:
-            try:
-                await browser.close()
-            except:
-                pass
-            browser = None
-        
         return {
             "success": False,
             "result": f"Browser automation failed: {str(e)}",
             "action_count": 0,
             "logs": [f"Error: {str(e)}"]
         }
+    finally:
+        # Always close browser after execution
+        try:
+            await browser.close()
+        except Exception:
+            pass
