@@ -6,8 +6,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-manrope);
+  --font-logo: var(--font-playfair-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,71 +48,72 @@
 
 :root {
   --radius: 0.625rem;
-  --background: #fafafa;
-  --foreground: #191919;
-  --card: #ffffff;
-  --card-foreground: #191919;
-  --popover: #ffffff;
-  --popover-foreground: #191919;
-  --primary: #191919;
-  --primary-foreground: #fafafa;
-  --secondary: #f5f5f5;
-  --secondary-foreground: #191919;
-  --muted: #f5f5f5;
-  --muted-foreground: #737373;
-  --accent: #f5f5f5;
-  --accent-foreground: #191919;
-  --destructive: #ef4444;
-  --border: #e5e5e5;
-  --input: #e5e5e5;
-  --ring: #191919;
-  --chart-1: #191919;
-  --chart-2: #525252;
-  --chart-3: #737373;
-  --chart-4: #a3a3a3;
-  --chart-5: #d4d4d4;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #191919;
-  --sidebar-primary: #191919;
-  --sidebar-primary-foreground: #fafafa;
-  --sidebar-accent: #f5f5f5;
-  --sidebar-accent-foreground: #191919;
-  --sidebar-border: #e5e5e5;
-  --sidebar-ring: #191919;
-}
-
-.dark {
-  --background: #0a0a0a;
-  --foreground: #fafafa;
-  --card: #171717;
-  --card-foreground: #fafafa;
-  --popover: #171717;
-  --popover-foreground: #fafafa;
-  --primary: #fafafa;
-  --primary-foreground: #171717;
+  /* Sentric dark theme as default */
+  --background: #0A0A0D;
+  --foreground: #FFFFFF;
+  --card: #1A1A1E;
+  --card-foreground: #FFFFFF;
+  --popover: #1A1A1E;
+  --popover-foreground: #FFFFFF;
+  --primary: #93C5FD;
+  --primary-foreground: #0A0A0D;
   --secondary: #262626;
-  --secondary-foreground: #fafafa;
-  --muted: #262626;
-  --muted-foreground: #a3a3a3;
-  --accent: #262626;
-  --accent-foreground: #fafafa;
+  --secondary-foreground: #FFFFFF;
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: #B3B3BF;
+  --accent: #93C5FD;
+  --accent-foreground: #0A0A0D;
   --destructive: #ef4444;
-  --border: #262626;
-  --input: #262626;
-  --ring: #d4d4d4;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #93C5FD;
   --chart-1: #e5e5e5;
   --chart-2: #a3a3a3;
   --chart-3: #737373;
   --chart-4: #525252;
   --chart-5: #262626;
-  --sidebar: #171717;
-  --sidebar-foreground: #fafafa;
-  --sidebar-primary: #fafafa;
-  --sidebar-primary-foreground: #171717;
-  --sidebar-accent: #262626;
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: #262626;
-  --sidebar-ring: #d4d4d4;
+  --sidebar: #1A1A1E;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #93C5FD;
+  --sidebar-primary-foreground: #0A0A0D;
+  --sidebar-accent: rgba(255, 255, 255, 0.05);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #93C5FD;
+}
+
+.dark {
+  --background: #0A0A0D;
+  --foreground: #FFFFFF;
+  --card: #1A1A1E;
+  --card-foreground: #FFFFFF;
+  --popover: #1A1A1E;
+  --popover-foreground: #FFFFFF;
+  --primary: #93C5FD;
+  --primary-foreground: #0A0A0D;
+  --secondary: #262626;
+  --secondary-foreground: #FFFFFF;
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: #B3B3BF;
+  --accent: #93C5FD;
+  --accent-foreground: #0A0A0D;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #93C5FD;
+  --chart-1: #e5e5e5;
+  --chart-2: #a3a3a3;
+  --chart-3: #737373;
+  --chart-4: #525252;
+  --chart-5: #262626;
+  --sidebar: #1A1A1E;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #93C5FD;
+  --sidebar-primary-foreground: #0A0A0D;
+  --sidebar-accent: rgba(255, 255, 255, 0.05);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #93C5FD;
 }
 
 @layer base {
@@ -122,6 +123,7 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    font-family: var(--font-manrope), sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
@@ -153,11 +155,17 @@
   ::-webkit-scrollbar-thumb:hover {
     background: var(--muted-foreground);
   }
+
+  /* Sentric selection style */
+  ::selection {
+    background: rgba(147, 197, 253, 0.2);
+    color: #93c5fd;
+  }
 }
 
 /* ReactFlow custom styles */
 .react-flow__node {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-manrope), system-ui, sans-serif;
 }
 
 .react-flow__attribution {

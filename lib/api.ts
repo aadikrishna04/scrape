@@ -308,10 +308,14 @@ export const api = {
   },
   mcp: {
     getServers: async (): Promise<MCPServerStatus[]> => {
-      const headers = await getAuthHeader()
-      const res = await fetch(`${API_URL}/mcp/servers`, { headers })
-      if (!res.ok) throw new Error('Failed to get MCP servers')
-      return res.json()
+      try {
+        const headers = await getAuthHeader()
+        const res = await fetch(`${API_URL}/mcp/servers`, { headers })
+        if (!res.ok) return []
+        return res.json()
+      } catch {
+        return []
+      }
     },
     addServer: async (config: Omit<MCPServerConfig, 'enabled'>): Promise<void> => {
       const headers = await getAuthHeader()
@@ -364,15 +368,33 @@ export const api = {
       if (!res.ok) throw new Error('Failed to remove MCP server')
     },
     getTools: async (): Promise<MCPTool[]> => {
-      const headers = await getAuthHeader()
-      const res = await fetch(`${API_URL}/mcp/tools`, { headers })
-      if (!res.ok) throw new Error('Failed to get tools')
-      return res.json()
+      try {
+        const headers = await getAuthHeader()
+        const res = await fetch(`${API_URL}/mcp/tools`, { headers })
+        if (!res.ok) return []
+        return res.json()
+      } catch {
+        return []
+      }
     },
     getToolSchema: async (toolName: string): Promise<Record<string, unknown>> => {
       const headers = await getAuthHeader()
       const res = await fetch(`${API_URL}/mcp/tools/${encodeURIComponent(toolName)}/schema`, { headers })
       if (!res.ok) throw new Error('Failed to get tool schema')
+      return res.json()
+    },
+  },
+  runs: {
+    list: async (projectId: string, page: number = 1): Promise<{ runs: Run[]; total: number }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/projects/${projectId}/runs?page=${page}`, { headers })
+      if (!res.ok) return { runs: [], total: 0 }
+      return res.json()
+    },
+    get: async (runId: string): Promise<RunDetail> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/runs/${runId}`, { headers })
+      if (!res.ok) throw new Error('Failed to get run')
       return res.json()
     },
   },
@@ -483,6 +505,31 @@ export const api = {
       if (!res.ok) throw new Error(`Failed to disconnect ${service}`)
     },
   },
+}
+
+// Run types
+export interface Run {
+  id: string
+  project_id: string
+  name: string | null
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  start_time: string
+  end_time: string | null
+  metadata: Record<string, any>
+  created_at: string
+}
+
+export interface RunEvent {
+  id: string
+  run_id: string
+  type: 'action' | 'reasoning' | 'node_start' | 'node_complete'
+  payload: Record<string, any>
+  timestamp: string
+  step_number: number | null
+}
+
+export interface RunDetail extends Run {
+  events: RunEvent[]
 }
 
 // Integration types

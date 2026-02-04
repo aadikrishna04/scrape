@@ -1,6 +1,7 @@
 """
 MCP Configuration - Default server configurations
 """
+import os
 from typing import List, Optional
 from dataclasses import dataclass, field
 from mcp_manager import MCPServerConfig
@@ -361,14 +362,14 @@ def get_default_configs() -> List[MCPServerConfig]:
             icon="cloud"
         ),
 
-        # Filesystem MCP Server (for local file operations)
+        # Filesystem MCP Server (always enabled for workspace file operations)
         MCPServerConfig(
             name="filesystem",
             display_name="File System",
             command="npx",
-            args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            args=["-y", "@modelcontextprotocol/server-filesystem", os.path.join(os.path.dirname(__file__), "workspace")],
             env={},
-            enabled=False,
+            enabled=True,
             icon="folder"
         ),
 

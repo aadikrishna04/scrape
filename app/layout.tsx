@@ -1,20 +1,22 @@
 import { Toaster } from '@/components/ui/sonner'
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Manrope, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const manrope = Manrope({
   subsets: ["latin"],
+  variable: "--font-manrope",
+  weight: ["200", "300", "400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const playfairDisplay = Playfair_Display({
   subsets: ["latin"],
+  variable: "--font-playfair-display",
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
-  title: 'PromptFlow - Build workflows with words',
+  title: 'Sentric | AI Workflow Builder',
   description: 'AI-powered workflow builder. Describe what you want in natural language.',
 };
 
@@ -24,9 +26,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${manrope.variable} ${playfairDisplay.variable} antialiased`}
       >
         {children}
         <Toaster />

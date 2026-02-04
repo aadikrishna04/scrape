@@ -160,8 +160,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PromptFlow API",
-    description="Backend API for PromptFlow - AI-powered workflow builder",
+    title="Sentric API",
+    description="Backend API for Sentric - AI-powered workflow builder",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -246,7 +246,7 @@ class AgenticExecuteRequest(BaseModel):
 # Health Check
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "PromptFlow API"}
+    return {"status": "healthy", "service": "Sentric API"}
 
 # Chat Endpoints
 @app.post("/api/chat", response_model=ChatResponse)
@@ -1900,12 +1900,221 @@ async def update_node_config(project_id: str, node_id: str, config: NodeConfigUp
     return {"success": True, "node_id": node_id}
 
 
+# ==================================
+# Runs Endpoints (Execution Logging)
+# ==================================
+
+class RunCreate(BaseModel):
+    name: Optional[str] = None
+
+class RunUpdate(BaseModel):
+    status: Optional[str] = None
+    end_time: Optional[str] = None
+
+class RunEventCreate(BaseModel):
+    type: str  # action, reasoning, node_start, node_complete
+    payload: Dict[str, Any] = {}
+    step_number: Optional[int] = None
+
+class RunResponse(BaseModel):
+    id: str
+    project_id: str
+    name: Optional[str]
+    status: str
+    start_time: str
+    end_time: Optional[str]
+    metadata: Dict[str, Any]
+    created_at: str
+
+class RunEventResponse(BaseModel):
+    id: str
+    run_id: str
+    type: str
+    payload: Dict[str, Any]
+    timestamp: str
+    step_number: Optional[int]
+
+class RunDetailResponse(RunResponse):
+    events: List[RunEventResponse]
+
+
+@app.get("/api/projects/{project_id}/runs")
+async def list_runs(project_id: str, page: int = 1, limit: int = 20, request: Request = None):
+    """List workflow execution runs for a project with pagination."""
+    _validate_project_id(project_id)
+
+    offset = (page - 1) * limit
+
+    try:
+        # Get total count
+        count_result = supabase_admin.table("runs").select("id", count="exact").eq("project_id", project_id).execute()
+        total = count_result.count if count_result.count is not None else 0
+
+        # Get runs
+        result = supabase_admin.table("runs").select("*").eq(
+            "project_id", project_id
+        ).order("start_time", desc=True).range(offset, offset + limit - 1).execute()
+
+        runs = [
+            {
+                "id": r["id"],
+                "project_id": r["project_id"],
+                "name": r.get("name"),
+                "status": r.get("status", "pending"),
+                "start_time": r.get("start_time"),
+                "end_time": r.get("end_time"),
+                "metadata": r.get("metadata", {}),
+                "created_at": r.get("created_at")
+            }
+            for r in result.data
+        ]
+
+        return {"runs": runs, "total": total, "page": page, "limit": limit}
+    except Exception as e:
+        # If runs/run_events tables don't exist yet (migration not applied), return empty list
+        print(f"[list_runs] Error listing runs for project {project_id}: {e}")
+        return {"runs": [], "total": 0, "page": page, "limit": limit}
+
+
+@app.get("/api/runs/{run_id}")
+async def get_run(run_id: str):
+    """Get a run with its events."""
+    # Get run
+    run_result = supabase_admin.table("runs").select("*").eq("id", run_id).execute()
+    if not run_result.data:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = run_result.data[0]
+
+    # Get events
+    events_result = supabase_admin.table("run_events").select("*").eq(
+        "run_id", run_id
+    ).order("timestamp").execute()
+
+    events = [
+        {
+            "id": e["id"],
+            "run_id": e["run_id"],
+            "type": e["type"],
+            "payload": e.get("payload", {}),
+            "timestamp": e["timestamp"],
+            "step_number": e.get("step_number")
+        }
+        for e in events_result.data
+    ]
+
+    return {
+        "id": run["id"],
+        "project_id": run["project_id"],
+        "name": run.get("name"),
+        "status": run.get("status", "pending"),
+        "start_time": run.get("start_time"),
+        "end_time": run.get("end_time"),
+        "metadata": run.get("metadata", {}),
+        "created_at": run.get("created_at"),
+        "events": events
+    }
+
+
+@app.post("/api/runs")
+async def create_run(project_id: str, body: RunCreate, request: Request):
+    """Create a new run record when workflow execution starts."""
+    _validate_project_id(project_id)
+
+    run_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    data = {
+        "id": run_id,
+        "project_id": project_id,
+        "name": body.name,
+        "status": "running",
+        "start_time": now,
+        "metadata": {},
+        "created_at": now
+    }
+
+    supabase_admin.table("runs").insert(data).execute()
+
+    return {
+        "id": run_id,
+        "project_id": project_id,
+        "name": body.name,
+        "status": "running",
+        "start_time": now,
+        "end_time": None,
+        "metadata": {},
+        "created_at": now
+    }
+
+
+@app.post("/api/runs/{run_id}/events")
+async def add_run_event(run_id: str, body: RunEventCreate):
+    """Add an event to a run."""
+    # Verify run exists
+    run_result = supabase_admin.table("runs").select("id").eq("id", run_id).execute()
+    if not run_result.data:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    event_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    data = {
+        "id": event_id,
+        "run_id": run_id,
+        "type": body.type,
+        "payload": body.payload,
+        "timestamp": now,
+        "step_number": body.step_number
+    }
+
+    supabase_admin.table("run_events").insert(data).execute()
+
+    return {
+        "id": event_id,
+        "run_id": run_id,
+        "type": body.type,
+        "payload": body.payload,
+        "timestamp": now,
+        "step_number": body.step_number
+    }
+
+
+@app.patch("/api/runs/{run_id}")
+async def update_run(run_id: str, body: RunUpdate):
+    """Update a run's status and/or end time."""
+    # Verify run exists
+    run_result = supabase_admin.table("runs").select("id").eq("id", run_id).execute()
+    if not run_result.data:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    update_data = {}
+    if body.status is not None:
+        update_data["status"] = body.status
+    if body.end_time is not None:
+        update_data["end_time"] = body.end_time
+    elif body.status in ["completed", "failed"]:
+        # Auto-set end_time if status is terminal
+        update_data["end_time"] = datetime.now(timezone.utc).isoformat()
+
+    if update_data:
+        supabase_admin.table("runs").update(update_data).eq("id", run_id).execute()
+
+    return {"success": True, "run_id": run_id}
+
+
 # MCP Server Endpoints
 @app.get("/api/mcp/servers", response_model=List[MCPServerStatusResponse])
-async def list_mcp_servers():
+async def list_mcp_servers(request: Request):
     """List all configured MCP servers and their connection status."""
     manager = get_mcp_manager()
-    statuses = manager.get_server_statuses()
+    user_id = _get_user_id_from_request(request)
+
+    # Connect user integrations so their status is accurate
+    if user_id:
+        await manager.ensure_all_user_integrations_connected(user_id)
+
+    statuses = manager.get_server_statuses(user_id=user_id)
     return [
         MCPServerStatusResponse(
             name=s.name,

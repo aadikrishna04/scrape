@@ -480,8 +480,8 @@ class MCPManager:
 
         return []
 
-    def get_server_statuses(self) -> List[MCPServerStatus]:
-        """Get status of all configured servers."""
+    def get_server_statuses(self, user_id: Optional[str] = None) -> List[MCPServerStatus]:
+        """Get status of all configured servers. Pass user_id to include user-specific connections."""
         statuses = []
 
         for name, config in self.configs.items():
@@ -497,6 +497,17 @@ class MCPManager:
                 ))
             elif name in self.connections:
                 conn = self.connections[name]
+                statuses.append(MCPServerStatus(
+                    name=name,
+                    display_name=config.display_name,
+                    connected=conn.connected,
+                    tool_count=len(conn.tools),
+                    icon=config.icon,
+                    error=conn.error,
+                ))
+            elif user_id and (name, user_id) in self._user_connections:
+                # Check user-specific connections
+                conn = self._user_connections[(name, user_id)]
                 statuses.append(MCPServerStatus(
                     name=name,
                     display_name=config.display_name,

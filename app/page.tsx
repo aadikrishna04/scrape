@@ -9,10 +9,10 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-foreground flex items-center justify-center">
-                <Workflow className="w-5 h-5 text-background" />
+              <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
+                <Workflow className="w-5 h-5 text-primary-foreground" />
               </div>
-              <span className="text-lg font-semibold tracking-tight">PromptFlow</span>
+              <span className="font-logo text-xl tracking-tight">Sentric</span>
             </div>
           </div>
         </div>

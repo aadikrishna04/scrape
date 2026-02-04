@@ -3,7 +3,8 @@
 import { memo } from 'react'
 import { Handle, Position } from 'reactflow'
 import { cn } from '@/lib/utils'
-import { Globe, Github, MessageSquare, Folder, Search, Database, Loader2, CheckCircle2, XCircle, Wrench, Zap } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { integrationLogos, DefaultLogo } from '@/components/icons/integration-logos'
 
 type NodeStatus = 'idle' | 'executing' | 'success' | 'failed'
 
@@ -18,31 +19,19 @@ interface MCPToolNodeProps {
   selected?: boolean
 }
 
-const iconMap: Record<string, React.ReactNode> = {
-  globe: <Globe className="w-4 h-4" />,
-  browser: <Globe className="w-4 h-4" />,
-  github: <Github className="w-4 h-4" />,
-  slack: <MessageSquare className="w-4 h-4" />,
-  folder: <Folder className="w-4 h-4" />,
-  filesystem: <Folder className="w-4 h-4" />,
-  search: <Search className="w-4 h-4" />,
-  database: <Database className="w-4 h-4" />,
-  scrape: <Zap className="w-4 h-4" />,
-  default: <Wrench className="w-4 h-4" />,
+function getServerFromToolName(toolName: string): string {
+  // Tool names are typically "server.action" format
+  const parts = toolName.split('.')
+  if (parts.length > 1) {
+    return parts[0]
+  }
+  return toolName
 }
 
-function getIconForTool(toolName: string, iconName?: string): React.ReactNode {
-  if (iconName && iconMap[iconName]) {
-    return iconMap[iconName]
-  }
-
-  if (toolName.startsWith('browser.')) return iconMap.globe
-  if (toolName.startsWith('github.')) return iconMap.github
-  if (toolName.startsWith('slack.')) return iconMap.slack
-  if (toolName.startsWith('filesystem.')) return iconMap.folder
-  if (toolName.startsWith('scrape.')) return iconMap.scrape
-
-  return iconMap.default
+function getIconForTool(toolName: string): React.ReactNode {
+  const serverName = getServerFromToolName(toolName)
+  const LogoComponent = integrationLogos[serverName] || DefaultLogo
+  return <LogoComponent className="w-4 h-4" />
 }
 
 function getStatusIcon(status: NodeStatus) {
@@ -63,7 +52,7 @@ const MCPToolNode = memo(({ data, selected }: MCPToolNodeProps) => {
   const toolName = data?.tool_name || 'unknown'
   const label = data?.label || toolName.split('.').pop()?.replace(/_/g, ' ') || 'Tool'
 
-  const toolIcon = getIconForTool(toolName, data?.icon)
+  const toolIcon = getIconForTool(toolName)
   const statusIcon = getStatusIcon(status)
 
   return (
@@ -86,7 +75,7 @@ const MCPToolNode = memo(({ data, selected }: MCPToolNodeProps) => {
       <div className="flex items-center gap-2.5">
         <div className={cn(
           "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-          status === 'idle' && "bg-muted text-muted-foreground",
+          status === 'idle' && "bg-muted/50",
           status === 'executing' && "bg-amber-100 text-amber-700",
           status === 'success' && "bg-emerald-100 text-emerald-700",
           status === 'failed' && "bg-red-100 text-red-600"

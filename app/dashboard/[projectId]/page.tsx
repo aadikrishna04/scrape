@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ChatPanel from "@/components/chat-panel";
 import WorkflowPanel from "@/components/workflow-panel";
+import LogsPanel from "@/components/logs-panel";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronLeft,
@@ -25,6 +26,7 @@ export default function ProjectPage() {
   const [projectName, setProjectName] = useState("");
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [currentWorkflow, setCurrentWorkflow] = useState<{ nodes: any[]; edges: any[] } | null>(null);
+  const [activeTab, setActiveTab] = useState<'workflow' | 'logs'>('workflow');
   const workflowPanelRef = useRef<{ updateNodeStatus: (nodeId: string, status: string) => void; updateWorkflow: (nodes: any[], edges: any[]) => void } | null>(null);
 
   useEffect(() => {
@@ -95,10 +97,10 @@ export default function ProjectPage() {
 
         {/* Logo */}
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-md bg-foreground flex items-center justify-center">
-            <Workflow className="w-3.5 h-3.5 text-background" />
+          <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
+            <Workflow className="w-3.5 h-3.5 text-primary-foreground" />
           </div>
-          <span className="font-semibold text-foreground hidden sm:inline">PromptFlow</span>
+          <span className="font-logo text-lg text-foreground hidden sm:inline">Sentric</span>
         </div>
 
         {/* Project Name */}
@@ -116,21 +118,23 @@ export default function ProjectPage() {
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setChatCollapsed(!chatCollapsed)}
-            className="gap-2 text-muted-foreground"
-          >
-            {chatCollapsed ? (
-              <PanelLeft className="w-4 h-4" />
-            ) : (
-              <PanelLeftClose className="w-4 h-4" />
-            )}
-            <span className="hidden sm:inline">
-              {chatCollapsed ? "Show Chat" : "Hide Chat"}
-            </span>
-          </Button>
+          {activeTab === 'workflow' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setChatCollapsed(!chatCollapsed)}
+              className="gap-2 text-muted-foreground"
+            >
+              {chatCollapsed ? (
+                <PanelLeft className="w-4 h-4" />
+              ) : (
+                <PanelLeftClose className="w-4 h-4" />
+              )}
+              <span className="hidden sm:inline">
+                {chatCollapsed ? "Show Chat" : "Hide Chat"}
+              </span>
+            </Button>
+          )}
 
           <Button
             variant="outline"
@@ -144,39 +148,71 @@ export default function ProjectPage() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Chat Panel */}
-        <div
+      {/* Tab Bar */}
+      <div className="flex border-b border-white/10 bg-card shrink-0">
+        <button
           className={cn(
-            "border-r border-border flex flex-col bg-card transition-all duration-300 ease-in-out overflow-hidden",
-            chatCollapsed ? "w-0" : "w-full sm:w-[380px] lg:w-[420px]"
+            "px-5 py-3 text-sm font-medium transition-colors",
+            activeTab === "workflow"
+              ? "border-b-2 border-accent text-white"
+              : "text-muted-foreground hover:text-white"
           )}
+          onClick={() => setActiveTab("workflow")}
         >
-          {!chatCollapsed && (
-            <ChatPanel
-              projectId={projectId}
-              onWorkflowUpdate={handleWorkflowUpdate}
-              onNodeStatusChange={handleNodeStatusChange}
-              version={chatVersion}
-              workflow={currentWorkflow}
-            />
+          Workflow
+        </button>
+        <button
+          className={cn(
+            "px-5 py-3 text-sm font-medium transition-colors",
+            activeTab === "logs"
+              ? "border-b-2 border-accent text-white"
+              : "text-muted-foreground hover:text-white"
           )}
-        </div>
+          onClick={() => setActiveTab("logs")}
+        >
+          Logs
+        </button>
+      </div>
 
-        {/* Workflow Canvas */}
-        <div className="flex-1 flex flex-col bg-muted/30 min-w-0 min-h-0">
-          <div className="flex-1 min-h-0 h-full">
-            <WorkflowPanel
-              ref={workflowPanelRef}
-              projectId={projectId}
-              version={workflowVersion}
-              onChatUpdate={handleChatUpdate}
-              onWorkflowChange={handleWorkflowChange}
-            />
+      {/* Main Content */}
+      {activeTab === 'workflow' ? (
+        <div className="flex-1 flex overflow-hidden">
+          {/* Chat Panel */}
+          <div
+            className={cn(
+              "border-r border-border flex flex-col bg-card transition-all duration-300 ease-in-out overflow-hidden",
+              chatCollapsed ? "w-0" : "w-full sm:w-[380px] lg:w-[420px]"
+            )}
+          >
+            {!chatCollapsed && (
+              <ChatPanel
+                projectId={projectId}
+                onWorkflowUpdate={handleWorkflowUpdate}
+                onNodeStatusChange={handleNodeStatusChange}
+                version={chatVersion}
+                workflow={currentWorkflow}
+              />
+            )}
+          </div>
+
+          {/* Workflow Canvas */}
+          <div className="flex-1 flex flex-col bg-muted/30 min-w-0 min-h-0">
+            <div className="flex-1 min-h-0 h-full">
+              <WorkflowPanel
+                ref={workflowPanelRef}
+                projectId={projectId}
+                version={workflowVersion}
+                onChatUpdate={handleChatUpdate}
+                onWorkflowChange={handleWorkflowChange}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <LogsPanel projectId={projectId} />
+        </div>
+      )}
     </div>
   );
 }

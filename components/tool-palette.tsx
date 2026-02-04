@@ -1,28 +1,18 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import type { MCPTool, MCPServerStatus } from '@/lib/types/mcp'
-import { Globe, Github, MessageSquare, Folder, Search, Database, Wrench, ChevronDown, ChevronRight, Zap, Circle } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { integrationLogos, DefaultLogo } from '@/components/icons/integration-logos'
 
 interface ToolPaletteProps {
   tools: MCPTool[]
   servers: MCPServerStatus[]
   onDragStart: (tool: MCPTool) => void
-}
-
-const iconMap: Record<string, React.ReactNode> = {
-  globe: <Globe className="w-4 h-4" />,
-  browser: <Globe className="w-4 h-4" />,
-  github: <Github className="w-4 h-4" />,
-  slack: <MessageSquare className="w-4 h-4" />,
-  folder: <Folder className="w-4 h-4" />,
-  filesystem: <Folder className="w-4 h-4" />,
-  search: <Search className="w-4 h-4" />,
-  database: <Database className="w-4 h-4" />,
-  scrape: <Zap className="w-4 h-4" />,
-  default: <Wrench className="w-4 h-4" />,
 }
 
 function groupToolsByServer(tools: MCPTool[]): Record<string, MCPTool[]> {
@@ -70,7 +60,10 @@ interface ServerSectionProps {
 
 function ServerSection({ server, tools, onDragStart }: ServerSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true)
-  const icon = iconMap[server.icon || server.name] || iconMap.default
+
+  // Get the logo component for this server
+  const LogoComponent = integrationLogos[server.name] || DefaultLogo
+  const icon = <LogoComponent className="w-4 h-4" />
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -83,16 +76,12 @@ function ServerSection({ server, tools, onDragStart }: ServerSectionProps) {
         ) : (
           <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
         )}
-        <div className="w-7 h-7 rounded-md bg-muted flex items-center justify-center shrink-0">
+        <div className="w-7 h-7 rounded-md bg-muted/50 flex items-center justify-center shrink-0">
           {icon}
         </div>
         <span className="font-medium text-sm flex-1 text-left text-foreground truncate">
           {server.display_name}
         </span>
-        <Circle className={cn(
-          "w-2 h-2 shrink-0",
-          server.connected ? "fill-emerald-500 text-emerald-500" : "fill-muted-foreground/30 text-muted-foreground/30"
-        )} />
         <span className="text-xs text-muted-foreground tabular-nums">{tools.length}</span>
       </button>
 
@@ -106,7 +95,7 @@ function ServerSection({ server, tools, onDragStart }: ServerSectionProps) {
 
       {isExpanded && tools.length === 0 && (
         <p className="px-4 pb-3 text-xs text-muted-foreground">
-          {server.connected ? 'No tools available' : 'Not connected'}
+          No tools available
         </p>
       )}
     </div>
@@ -114,13 +103,16 @@ function ServerSection({ server, tools, onDragStart }: ServerSectionProps) {
 }
 
 export default function ToolPalette({ tools, servers, onDragStart }: ToolPaletteProps) {
+  const router = useRouter()
   const toolsByServer = groupToolsByServer(tools)
 
-  const sortedServers = [...servers].sort((a, b) => {
-    if (a.connected && !b.connected) return -1
-    if (!a.connected && b.connected) return 1
-    return a.display_name.localeCompare(b.display_name)
-  })
+  // Only show connected servers
+  const connectedServers = servers.filter(server => server.connected)
+
+  // Sort by display name
+  const sortedServers = [...connectedServers].sort((a, b) =>
+    a.display_name.localeCompare(b.display_name)
+  )
 
   return (
     <div className="w-96 border-r border-border bg-card flex flex-col h-full shrink-0 overflow-hidden">
@@ -141,17 +133,29 @@ export default function ToolPalette({ tools, servers, onDragStart }: ToolPalette
           />
         ))}
 
-        {servers.length === 0 && (
+        {sortedServers.length === 0 && (
           <div className="p-6 text-center">
             <p className="text-sm text-muted-foreground">
-              No servers configured.
+              No integrations connected.
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Add integrations in Settings.
+              Add integrations to start building workflows.
             </p>
           </div>
         )}
       </ScrollArea>
+
+      {/* Add New Button */}
+      <div className="p-3 border-t border-border">
+        <Button
+          variant="outline"
+          className="w-full justify-center gap-2"
+          onClick={() => router.push('/settings')}
+        >
+          <Plus className="w-4 h-4" />
+          Add New Integration
+        </Button>
+      </div>
     </div>
   )
 }

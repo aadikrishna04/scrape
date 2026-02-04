@@ -26,30 +26,12 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  Github,
-  Mail,
-  HardDrive,
-  Globe,
   Loader2,
   ExternalLink,
   Key,
   Eye,
   EyeOff,
   Circle,
-  Zap,
-  Database,
-  Calendar,
-  CreditCard,
-  MessageCircle,
-  Cloud,
-  Phone,
-  Table,
-  CheckSquare,
-  Layout,
-  Server,
-  LayoutList,
-  Search,
-  LucideIcon,
   CheckCircle2,
   AlertCircle,
   Copy,
@@ -58,32 +40,7 @@ import {
 import { api, IntegrationStatus, IntegrationRequirements } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-
-// Icon mapping for integrations
-const ICON_MAP: Record<string, LucideIcon> = {
-  globe: Globe,
-  github: Github,
-  mail: Mail,
-  folder: HardDrive,
-  database: Database,
-  calendar: Calendar,
-  "credit-card": CreditCard,
-  "message-circle": MessageCircle,
-  cloud: Cloud,
-  phone: Phone,
-  table: Table,
-  "check-square": CheckSquare,
-  layout: Layout,
-  server: Server,
-  "layout-list": LayoutList,
-  search: Search,
-  zap: Zap,
-  slack: MessageCircle,
-  notion: Layout,
-  linear: LayoutList,
-  jira: CheckSquare,
-  trello: Table,
-};
+import { integrationLogos, DefaultLogo } from "@/components/icons/integration-logos";
 
 // Integration metadata for UI display (capabilities, etc.)
 const INTEGRATION_META: Record<string, { capabilities: string[] }> = {
@@ -280,8 +237,8 @@ export default function IntegrationsTab() {
   };
 
   const getIcon = (integration: IntegrationStatus) => {
-    const IconComponent = ICON_MAP[integration.icon || ""] || ICON_MAP[integration.name] || Globe;
-    return <IconComponent className="w-5 h-5" />;
+    const LogoComponent = integrationLogos[integration.name] || DefaultLogo;
+    return <LogoComponent className="w-5 h-5" />;
   };
 
   const getCapabilities = (name: string): string[] => {
@@ -290,7 +247,7 @@ export default function IntegrationsTab() {
 
   // Group integrations by category
   const groupedIntegrations = {
-    core: integrations.filter(i => ["browser", "scrape", "ai", "github", "filesystem"].includes(i.name)),
+    core: integrations.filter(i => ["browser", "scrape", "ai", "github"].includes(i.name)),
     productivity: integrations.filter(i => ["notion", "linear", "jira", "trello", "airtable"].includes(i.name)),
     communication: integrations.filter(i => ["slack", "discord", "gmail", "sendgrid", "twilio", "google-calendar"].includes(i.name)),
     data: integrations.filter(i => ["postgres", "mongodb", "redis", "google-drive"].includes(i.name)),

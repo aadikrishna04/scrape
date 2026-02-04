@@ -130,10 +130,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             onClick={() => router.push('/dashboard')}
             className="flex items-center gap-3 hover:opacity-80 transition-opacity"
           >
-            <div className="w-8 h-8 rounded-lg bg-foreground flex items-center justify-center">
-              <Workflow className="w-4 h-4 text-background" />
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+              <Workflow className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-foreground tracking-tight">PromptFlow</span>
+            <span className="font-logo text-lg text-foreground tracking-tight">Sentric</span>
           </button>
         </div>
 
