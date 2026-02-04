@@ -81,7 +81,7 @@ def fill_github_defaults_at_runtime(tool_name: str, params: Dict[str, Any], cont
 class WorkflowExecutor:
     """Executes agentic workflows with sequential node processing."""
 
-    def __init__(self, workflow: Dict[str, Any], user_id: Optional[str] = None):
+    def __init__(self, workflow: Dict[str, Any], user_id: Optional[str] = None, stream_callback: Optional[Callable] = None):
         self.workflow = workflow
         self.nodes = {node["id"]: node for node in workflow.get("nodes", [])}
         self.edges = workflow.get("edges", [])
@@ -90,6 +90,17 @@ class WorkflowExecutor:
         self.execution_log = []
         self.mcp_manager = get_mcp_manager()
         self.user_id = user_id
+        self.stream_callback = stream_callback
+
+    async def _notify_status(self, node_id: str, status: str):
+        """Notify stream callback of node status change."""
+        print(f"[WorkflowExecutor] Notifying status: node_id={node_id}, status={status}")
+        if self.stream_callback:
+            await self.stream_callback({
+                "type": "node_status_change",
+                "node_id": node_id,
+                "status": status
+            })
 
     def _resolve_references(self, value: Any) -> Any:
         """
@@ -192,6 +203,9 @@ class WorkflowExecutor:
             "status": "pending",
             "label": node.get("label", node.get("data", {}).get("label", node_id))
         }
+
+        # Notify that this node is now executing
+        await self._notify_status(node_id, "executing")
 
         try:
             if node_type == "mcp_tool":
@@ -308,6 +322,10 @@ class WorkflowExecutor:
             result["status"] = "error"
             result["error"] = str(e)
 
+        # Notify that this node has completed
+        final_status = "success" if result["status"] == "success" else "failed"
+        await self._notify_status(node_id, final_status)
+
         self.execution_log.append(result)
         return result
 
@@ -369,18 +387,19 @@ class WorkflowExecutor:
             }
 
 
-async def execute_workflow(workflow: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
+async def execute_workflow(workflow: Dict[str, Any], user_id: Optional[str] = None, stream_callback: Optional[Callable] = None) -> Dict[str, Any]:
     """
     Convenience function to execute a workflow.
 
     Args:
         workflow: Dict with 'nodes' and 'edges' keys
         user_id: Optional user ID for per-user integrations (e.g. GitHub OAuth)
+        stream_callback: Optional callback for real-time node status updates
 
     Returns:
         Execution results
     """
-    executor = WorkflowExecutor(workflow, user_id=user_id)
+    executor = WorkflowExecutor(workflow, user_id=user_id, stream_callback=stream_callback)
     return await executor.execute()
 
 
@@ -395,6 +414,16 @@ class AgenticWorkflowExecutor:
         self.stream_callback = stream_callback
         self.user_id = user_id
         self.events = []
+
+    async def _notify_status(self, node_id: str, status: str):
+        """Notify stream callback of node status change."""
+        print(f"[WorkflowExecutor] Notifying status: node_id={node_id}, status={status}")
+        if self.stream_callback:
+            await self.stream_callback({
+                "type": "node_status_change",
+                "node_id": node_id,
+                "status": status
+            })
 
     async def _event_handler(self, event: Dict[str, Any]):
         """Handle events from the orchestrator."""

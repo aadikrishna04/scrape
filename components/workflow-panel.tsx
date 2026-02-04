@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, memo, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useCallback, useEffect, useState, memo, forwardRef, useImperativeHandle } from 'react'
 import ReactFlow, {
   Background,
   Controls,
@@ -109,6 +109,12 @@ const AITransformNode = memo(({ data }: { data: Record<string, unknown> }) => {
 })
 AITransformNode.displayName = 'AITransformNode'
 
+const nodeTypes = {
+  browser_agent: BrowserAgentNode,
+  ai_transform: AITransformNode,
+  mcp_tool: MCPToolNode,
+}
+
 interface WorkflowPanelProps {
   projectId: string
   version?: number
@@ -124,6 +130,7 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [isRunning, setIsRunning] = useState(false)
+  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'success' | 'failed'>('idle')
   const [executionStatus, setExecutionStatus] = useState<Record<string, NodeStatus>>({})
   const [tools, setTools] = useState<MCPTool[]>([])
   const [servers, setServers] = useState<MCPServerStatus[]>([])
@@ -146,12 +153,6 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
       setEdges(edgesWithIds)
     },
   }), [setNodes, setEdges])
-
-  const nodeTypes = useMemo(() => ({
-    browser_agent: BrowserAgentNode,
-    ai_transform: AITransformNode,
-    mcp_tool: MCPToolNode,
-  }), [])
 
   useEffect(() => {
     loadToolsAndServers()
@@ -220,9 +221,9 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
   const handleSave = async () => {
     try {
       await api.workflows.update(projectId, { nodes, edges })
-      toast.success('Workflow saved')
     } catch (error) {
       toast.error('Failed to save workflow')
+      throw error // Re-throw so callers know save failed
     }
   }
 
@@ -340,6 +341,7 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
     }
 
     setIsRunning(true)
+    setRunStatus('running')
     setSelectedNode(null)
     resetNodeStatuses()
 
@@ -349,49 +351,50 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
     try {
       await handleSave()
 
-      if (nodeIds.length > 0) {
-        updateNodeStatus(nodeIds[0], 'executing')
-      }
-
-      const result = await api.workflows.execute(projectId)
-
-      const executionOrder = result.execution_order || nodeIds
-      const results = result.results || []
-
-      const resultMap: Record<string, string> = {}
-      results.forEach((r: Record<string, unknown>) => {
-        resultMap[r.node_id as string] = r.status === 'success' ? 'success' : 'failed'
-      })
-
-      executionOrder.forEach((nodeId: string) => {
-        const status = resultMap[nodeId] || 'failed'
-        updateNodeStatus(nodeId, status as NodeStatus)
-      })
-
-      if (result.status === 'completed') {
-        toast.success('Workflow executed successfully')
-      } else if (result.status === 'partial_failure') {
-        toast.warning('Workflow completed with issues')
-      } else {
-        toast.error('Workflow execution failed')
-      }
-
-      onChatUpdate?.()
+      // Use streaming execution to get real-time node status updates
+      await api.workflows.executeStream(
+        projectId,
+        (event) => {
+          if (event.type === 'node_status_change' && event.node_id && event.status) {
+            updateNodeStatus(event.node_id, event.status as NodeStatus)
+          } else if (event.type === 'done') {
+            const data = event.data
+            if (data?.status === 'completed') {
+              setRunStatus('success')
+              toast.success('Workflow executed successfully')
+            } else if (data?.status === 'partial_failure') {
+              setRunStatus('failed')
+              toast.warning('Workflow completed with issues')
+            } else {
+              setRunStatus('failed')
+              toast.error('Workflow execution failed')
+            }
+            onChatUpdate?.()
+          } else if (event.type === 'error') {
+            setRunStatus('failed')
+            toast.error('Failed to execute workflow')
+            nodeIds.forEach((id) => updateNodeStatus(id, 'failed'))
+            onChatUpdate?.()
+          }
+        }
+      )
     } catch (error) {
       console.error('Execution error:', error)
+      setRunStatus('failed')
       nodeIds.forEach((id) => updateNodeStatus(id, 'failed'))
       toast.error('Failed to execute workflow')
       onChatUpdate?.()
     } finally {
       setIsRunning(false)
       setTimeout(() => {
+        setRunStatus('idle')
         resetNodeStatuses()
       }, 5000)
     }
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0">
       {/* Tool Palette */}
       {showPalette && (
         <ToolPalette
@@ -402,7 +405,7 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
       )}
 
       {/* Canvas */}
-      <div className="flex-1 h-full relative">
+      <div className="flex-1 h-full min-h-0 relative">
         {/* Top Left Controls */}
         <div className="absolute top-4 left-4 z-10 flex gap-2">
           <Button
@@ -429,24 +432,28 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
 
         {/* Top Right Controls */}
         <div className="absolute top-4 right-4 z-10 flex gap-3 items-center">
-          {isRunning && (
-            <div className="flex items-center gap-2 bg-amber-100 text-amber-800 px-3 py-2 rounded-lg text-sm font-medium">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="hidden sm:inline">Running...</span>
-            </div>
-          )}
           <Button
             onClick={handleExecute}
             disabled={isRunning || nodes.length === 0}
-            className="bg-foreground hover:bg-foreground/90 text-background shadow-sm"
+            className={cn(
+              "shadow-sm transition-colors duration-200",
+              runStatus === 'idle' && "bg-foreground hover:bg-foreground/90 text-background",
+              runStatus === 'running' && "bg-amber-500 hover:bg-amber-600 text-white",
+              runStatus === 'success' && "bg-emerald-500 hover:bg-emerald-600 text-white",
+              runStatus === 'failed' && "bg-red-500 hover:bg-red-600 text-white"
+            )}
           >
             {isRunning ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : runStatus === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 mr-2" />
+            ) : runStatus === 'failed' ? (
+              <XCircle className="w-4 h-4 mr-2" />
             ) : (
               <Play className="w-4 h-4 mr-2" />
             )}
             <span className="hidden sm:inline">
-              {isRunning ? 'Running...' : 'Run Workflow'}
+              {isRunning ? 'Running...' : runStatus === 'success' ? 'Success' : runStatus === 'failed' ? 'Failed' : 'Run Workflow'}
             </span>
             <span className="sm:hidden">Run</span>
           </Button>
@@ -463,6 +470,7 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
           onDrop={onDrop}
           onDragOver={onDragOver}
           nodeTypes={nodeTypes}
+          className="w-full h-full"
           fitView
           proOptions={{ hideAttribution: true }}
         >

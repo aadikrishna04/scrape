@@ -1558,6 +1558,174 @@ async def execute_workflow(project_id: str):
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
 
+@app.post("/api/workflows/{project_id}/execute/stream")
+async def execute_workflow_stream(project_id: str, request: Request):
+    """
+    Execute a workflow with real-time streaming updates via Server-Sent Events.
+    Streams node status changes (executing, success, failed) during execution.
+    """
+    _validate_project_id(project_id)
+
+    # Fetch workflow and project (for user_id) from database
+    workflow_result = supabase_admin.table("workflows").select("*").eq("project_id", project_id).execute()
+    if not workflow_result.data:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    project_result = supabase_admin.table("projects").select("user_id").eq("id", project_id).execute()
+    user_id = project_result.data[0].get("user_id") if project_result.data else None
+
+    workflow = workflow_result.data[0]
+    workflow_data = {
+        "nodes": workflow.get("nodes", []),
+        "edges": workflow.get("edges", [])
+    }
+
+    # At execution time, ensure GitHub owner is set for any github.* node
+    if user_id:
+        github_login = await _get_github_login_for_user(user_id)
+        _inject_github_owner_into_workflow(workflow_data, github_login)
+
+    # Check if workflow has any nodes
+    if not workflow_data["nodes"]:
+        async def empty_generator():
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": "No nodes to execute. Create a workflow first."})
+            }
+        return EventSourceResponse(empty_generator())
+
+    async def event_generator():
+        """Generate SSE events from workflow execution."""
+        event_queue = asyncio.Queue()
+
+        async def stream_callback(event: Dict[str, Any]):
+            """Callback for execution events."""
+            await event_queue.put(event)
+
+        async def run_workflow():
+            """Execute workflow in background."""
+            try:
+                # Save workflow before execution
+                try:
+                    existing = supabase_admin.table("workflows").select("id").eq("project_id", project_id).execute()
+                    data = {
+                        "project_id": project_id,
+                        "nodes": workflow_data.get("nodes", []),
+                        "edges": workflow_data.get("edges", []),
+                    }
+                    if existing.data:
+                        supabase_admin.table("workflows").update(data).eq("project_id", project_id).execute()
+                    else:
+                        data["id"] = str(uuid.uuid4())
+                        data["created_at"] = datetime.now(timezone.utc).isoformat()
+                        supabase_admin.table("workflows").insert(data).execute()
+                except Exception as e:
+                    # Don't fail execution purely due to a save error
+                    print(f"[execute/stream] Failed to save workflow before execution: {e}")
+
+                # Execute with streaming callback
+                execution_result = await run_workflow_engine(
+                    workflow_data,
+                    user_id=user_id,
+                    stream_callback=stream_callback
+                )
+
+                # Store execution result as chat message
+                status = execution_result["status"]
+                results = execution_result.get("results", [])
+                total_steps = len(results)
+                successful_steps = sum(1 for r in results if r.get("status") == "success")
+
+                if status == "completed":
+                    message_parts = [f"## ✅ Workflow Complete\n\n**{successful_steps}/{total_steps}** steps succeeded\n\n---\n\n"]
+                elif status == "partial_failure":
+                    message_parts = [f"## ⚠️ Workflow Finished\n\n**{successful_steps}/{total_steps}** steps succeeded\n\n---\n\n"]
+                else:
+                    message_parts = ["## ❌ Workflow Failed\n\n---\n\n"]
+
+                # Get final result
+                final_context = execution_result.get("final_context", {})
+                if status == "completed" and final_context:
+                    last_key = list(final_context.keys())[-1] if final_context else None
+                    if last_key:
+                        final_output = final_context[last_key]
+                        if isinstance(final_output, str):
+                            final_output = final_output.strip()
+                            if len(final_output) > 1500:
+                                final_output = final_output[:1500] + "..."
+                            message_parts.append(f"### Results\n\n{final_output}")
+
+                chat_message = "".join(message_parts)
+
+                # Store in chat history
+                supabase_admin.table("chat_history").insert({
+                    "id": str(uuid.uuid4()),
+                    "project_id": project_id,
+                    "role": "assistant",
+                    "content": chat_message,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }).execute()
+
+                await event_queue.put({
+                    "type": "execution_complete",
+                    "data": {
+                        "status": status,
+                        "results": results,
+                        "chat_message": chat_message
+                    }
+                })
+            except Exception as e:
+                await event_queue.put({"type": "error", "data": str(e)})
+
+        # Start workflow execution in background
+        workflow_task = asyncio.create_task(run_workflow())
+
+        # Yield events as they come in
+        while True:
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=60.0)
+                event_type = event.get("type")
+                event_data = event.get("data")
+
+                if event_type == "node_status_change":
+                    yield {
+                        "event": "node_status_change",
+                        "data": json.dumps({
+                            "node_id": event.get("node_id"),
+                            "status": event.get("status")
+                        })
+                    }
+                elif event_type == "execution_complete":
+                    yield {
+                        "event": "done",
+                        "data": json.dumps(event_data)
+                    }
+                    break
+                elif event_type == "error":
+                    yield {
+                        "event": "error",
+                        "data": json.dumps({"error": str(event_data)})
+                    }
+                    break
+
+            except asyncio.TimeoutError:
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"error": "Execution timed out"})
+                }
+                break
+
+        # Ensure workflow task is complete
+        if not workflow_task.done():
+            workflow_task.cancel()
+            try:
+                await workflow_task
+            except asyncio.CancelledError:
+                pass
+
+    return EventSourceResponse(event_generator())
+
+
 @app.post("/api/workflows/{project_id}/execute-agentic")
 async def execute_workflow_agentic(project_id: str, body: AgenticExecuteRequest, request: Request):
     """

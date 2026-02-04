@@ -1,7 +1,8 @@
 import { supabase } from '@/lib/supabase'
 import type { MCPServerStatus, MCPTool, MCPServerConfig, NodeConfigUpdate } from '@/lib/types/mcp'
 
-const API_URL = 'http://localhost:8000/api'
+const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_URL = RAW_API_URL.endsWith('/api') ? RAW_API_URL : `${RAW_API_URL}/api`
 
 // SSE Event Types for streaming chat
 export type AgentEvent =
@@ -202,6 +203,87 @@ export const api = {
       })
       if (!res.ok) throw new Error('Failed to execute workflow')
       return res.json()
+    },
+    /**
+     * Stream workflow execution with real-time node status updates via SSE
+     * @param projectId - The project ID
+     * @param onEvent - Callback for SSE events (node_status_change, done, error)
+     */
+    executeStream: async (
+      projectId: string,
+      onEvent: (event: { type: string; node_id?: string; status?: string; data?: any }) => void
+    ): Promise<void> => {
+      const headers = await getAuthHeader()
+
+      const response = await fetch(`${API_URL}/workflows/${projectId}/execute/stream`, {
+        method: 'POST',
+        headers,
+      })
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '')
+        throw new Error(
+          `Failed to start workflow execution stream (HTTP ${response.status})${detail ? `: ${detail}` : ''}`
+        )
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEventType: string | null = null
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              currentEventType = line.slice(6).trim() || null
+              continue
+            }
+            if (line.startsWith('data:')) {
+              const dataStr = line.slice(5).trim()
+              if (dataStr) {
+                try {
+                  const data = JSON.parse(dataStr)
+                  if (currentEventType === 'node_status_change') {
+                    if (data.node_id !== undefined && data.status !== undefined) {
+                      onEvent({ type: 'node_status_change', node_id: data.node_id, status: data.status })
+                    }
+                  } else if (currentEventType === 'done') {
+                    onEvent({ type: 'done', data })
+                  } else if (currentEventType === 'error') {
+                    onEvent({ type: 'error', data })
+                  } else {
+                    if (data.node_id !== undefined && data.status !== undefined) {
+                      onEvent({ type: 'node_status_change', node_id: data.node_id, status: data.status })
+                    } else if (data.status !== undefined && data.results !== undefined) {
+                      onEvent({ type: 'done', data })
+                    } else if (data.error !== undefined) {
+                      onEvent({ type: 'error', data })
+                    }
+                  }
+
+                  currentEventType = null
+                } catch (e) {
+                  console.error('Failed to parse SSE data:', e)
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
     },
     executeAgentic: async (projectId: string, goal: string) => {
       const headers = await getAuthHeader()

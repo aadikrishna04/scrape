@@ -167,12 +167,8 @@ class LangGraphAgent:
         return state.get("intent", INTENT_CONVERSATION)
 
     def _route_after_build(self, state: AgentState) -> Literal["execute", "end"]:
-        """After building workflow, decide whether to execute it or just display it."""
-        intent = state.get("intent", INTENT_CONVERSATION)
-        # If user wanted to execute (do a task), proceed to execute
-        # If user just wanted to create/view workflow, end here
-        if intent == INTENT_EXECUTE:
-            return "execute"
+        """After building workflow, always end here - user must manually click Run Workflow."""
+        # Never auto-execute from chat - let user review and click Run Workflow manually
         return "end"
 
     def _should_continue_or_replan(self, state: AgentState) -> Literal["continue", "replan", "end"]:
@@ -210,10 +206,36 @@ class LangGraphAgent:
 
         user_text = last_message.content.lower()
 
-        # Simple intent classification (can be enhanced with LLM)
-        # Execute intent: direct action requests or tool-related verbs
+        # IMPORTANT: Check for workflow creation/modification FIRST
+        # These should NOT trigger auto-execution
+        workflow_create_keywords = [
+            "create workflow", "build workflow", "make workflow", "new workflow", 
+            "set up workflow", "create a workflow", "build a workflow", "make a workflow",
+            "workflow to", "workflow that", "workflow for",
+        ]
+        if any(kw in user_text for kw in workflow_create_keywords):
+            print(f"[Agent] Classified as WORKFLOW_CREATE: {user_text[:50]}...")
+            return {"intent": INTENT_WORKFLOW_CREATE}
+
+        workflow_modify_keywords = [
+            "modify workflow", "change workflow", "update workflow", 
+            "edit workflow", "add to workflow"
+        ]
+        if any(kw in user_text for kw in workflow_modify_keywords):
+            return {"intent": INTENT_WORKFLOW_MODIFY}
+
+        # Execute intent: ONLY for explicit execution commands
+        # User must explicitly want to run something NOW
         execute_keywords = [
-            "run", "execute", "start", "do it", "go ahead",
+            "run", "execute", "start", "do it", "go ahead", "run it", "execute it",
+        ]
+        if any(kw in user_text for kw in execute_keywords):
+            print(f"[Agent] Classified as EXECUTE: {user_text[:50]}...")
+            return {"intent": INTENT_EXECUTE}
+
+        # For action-oriented requests without explicit workflow/execute keywords,
+        # treat them as workflow creation (user can then run manually)
+        action_keywords = [
             # Email actions
             "send email", "send an email", "email to", "list email", "list my email",
             "get email", "read email", "check email", "reply to", "emails",
@@ -227,19 +249,13 @@ class LangGraphAgent:
             # GitHub actions
             "create issue", "create pr", "pull request", "commit", "push",
             "github", "repo",
-            # General action verbs
+            # General action verbs - these create workflows, NOT execute
             "scrape", "fetch", "get the", "show me", "find", "search for", "look up",
             "send", "post", "delete", "remove",
         ]
-        if any(kw in user_text for kw in execute_keywords):
-            print(f"[Agent] Classified as EXECUTE: {user_text[:50]}...")
-            return {"intent": INTENT_EXECUTE}
-
-        if any(kw in user_text for kw in ["create workflow", "build workflow", "make workflow", "new workflow", "set up workflow"]):
+        if any(kw in user_text for kw in action_keywords):
+            print(f"[Agent] Classified as WORKFLOW_CREATE (action request): {user_text[:50]}...")
             return {"intent": INTENT_WORKFLOW_CREATE}
-
-        if any(kw in user_text for kw in ["modify workflow", "change workflow", "update workflow", "edit workflow", "add to workflow"]):
-            return {"intent": INTENT_WORKFLOW_MODIFY}
 
         if any(kw in user_text for kw in ["what is", "how does", "why", "can you explain", "explain", "tell me about"]):
             return {"intent": INTENT_QUESTION}
