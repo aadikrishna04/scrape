@@ -1,6 +1,25 @@
 import { supabase } from '@/lib/supabase'
+import type { MCPServerStatus, MCPTool, MCPServerConfig, NodeConfigUpdate } from '@/lib/types/mcp'
 
 const API_URL = 'http://localhost:8000/api'
+
+// SSE Event Types for streaming chat
+export type AgentEvent =
+  | { type: 'agent_thinking'; content: string }
+  | { type: 'workflow_update'; nodes: any[]; edges: any[] }
+  | { type: 'node_status_change'; nodeId: string; status: 'executing' | 'success' | 'failed' }
+  | { type: 'step_started'; tool: string; params: Record<string, unknown> }
+  | { type: 'step_completed'; tool: string; output: string }
+  | { type: 'plan_created'; steps: PlanStep[] }
+  | { type: 'execution_complete'; success: boolean }
+  | { type: 'error'; error: string }
+  | { type: 'done'; message: string; workflow_update?: { nodes: any[]; edges: any[] } | null }
+
+export interface PlanStep {
+  tool_name: string
+  params: Record<string, unknown>
+  description: string
+}
 
 async function getAuthHeader() {
   const { data: { session } } = await supabase.auth.getSession()
@@ -72,6 +91,89 @@ export const api = {
       if (!res.ok) throw new Error('Failed to get chat history')
       return res.json()
     },
+    /**
+     * Stream chat responses via Server-Sent Events (SSE)
+     * @param projectId - The project ID
+     * @param message - User message
+     * @param workflow - Optional current workflow state
+     * @param onEvent - Callback for SSE events
+     */
+    streamChat: async (
+      projectId: string,
+      message: string,
+      workflow: { nodes: any[], edges: any[] } | null,
+      onEvent: (event: AgentEvent) => void
+    ): Promise<void> => {
+      const headers = await getAuthHeader()
+
+      const response = await fetch(`${API_URL}/chat/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ project_id: projectId, message, workflow }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to start streaming')
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              const eventType = line.slice(6).trim()
+              continue
+            }
+            if (line.startsWith('data:')) {
+              const dataStr = line.slice(5).trim()
+              if (dataStr) {
+                try {
+                  const data = JSON.parse(dataStr)
+                  // Determine event type from the data structure
+                  if (data.content !== undefined) {
+                    onEvent({ type: 'agent_thinking', content: data.content })
+                  } else if (data.nodes !== undefined) {
+                    onEvent({ type: 'workflow_update', nodes: data.nodes, edges: data.edges || [] })
+                  } else if (data.nodeId !== undefined && data.status !== undefined) {
+                    onEvent({ type: 'node_status_change', nodeId: data.nodeId, status: data.status })
+                  } else if (data.tool !== undefined && data.params !== undefined) {
+                    onEvent({ type: 'step_started', tool: data.tool, params: data.params })
+                  } else if (data.tool !== undefined && data.output !== undefined) {
+                    onEvent({ type: 'step_completed', tool: data.tool, output: data.output })
+                  } else if (data.steps !== undefined) {
+                    onEvent({ type: 'plan_created', steps: data.steps })
+                  } else if (data.success !== undefined && data.message === undefined) {
+                    onEvent({ type: 'execution_complete', success: data.success })
+                  } else if (data.error !== undefined) {
+                    onEvent({ type: 'error', error: data.error })
+                  } else if (data.message !== undefined) {
+                    onEvent({ type: 'done', message: data.message, workflow_update: data.workflow_update })
+                  }
+                } catch (e) {
+                  console.error('Failed to parse SSE data:', e)
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+    },
   },
   workflows: {
     get: async (projectId: string) => {
@@ -101,5 +203,224 @@ export const api = {
       if (!res.ok) throw new Error('Failed to execute workflow')
       return res.json()
     },
+    executeAgentic: async (projectId: string, goal: string) => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/workflows/${projectId}/execute-agentic`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ goal }),
+      })
+      if (!res.ok) throw new Error('Failed to execute agentic workflow')
+      return res.json()
+    },
+    updateNode: async (projectId: string, nodeId: string, config: NodeConfigUpdate) => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/workflows/${projectId}/nodes/${nodeId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(config),
+      })
+      if (!res.ok) throw new Error('Failed to update node')
+      return res.json()
+    },
   },
+  mcp: {
+    getServers: async (): Promise<MCPServerStatus[]> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/servers`, { headers })
+      if (!res.ok) throw new Error('Failed to get MCP servers')
+      return res.json()
+    },
+    addServer: async (config: Omit<MCPServerConfig, 'enabled'>): Promise<void> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/servers`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(config),
+      })
+      if (!res.ok) throw new Error('Failed to add MCP server')
+    },
+    connectServer: async (serverName: string, token?: string): Promise<void> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/servers/${serverName}/connect`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ token }),
+      })
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to connect MCP server' }))
+        throw new Error(error.detail || 'Failed to connect MCP server')
+      }
+    },
+    getServerRequirements: async (serverName: string): Promise<{
+      requires_auth: boolean
+      type: string
+      name: string | null
+      description: string | null
+      env_var: string | null
+      help_url: string | null
+    }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/servers/${serverName}/requirements`, { headers })
+      if (!res.ok) throw new Error('Failed to get server requirements')
+      return res.json()
+    },
+    disconnectServer: async (serverName: string): Promise<void> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/servers/${serverName}/disconnect`, {
+        method: 'POST',
+        headers,
+      })
+      if (!res.ok) throw new Error('Failed to disconnect MCP server')
+    },
+    removeServer: async (serverName: string): Promise<void> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/servers/${serverName}`, {
+        method: 'DELETE',
+        headers,
+      })
+      if (!res.ok) throw new Error('Failed to remove MCP server')
+    },
+    getTools: async (): Promise<MCPTool[]> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/tools`, { headers })
+      if (!res.ok) throw new Error('Failed to get tools')
+      return res.json()
+    },
+    getToolSchema: async (toolName: string): Promise<Record<string, unknown>> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/mcp/tools/${encodeURIComponent(toolName)}/schema`, { headers })
+      if (!res.ok) throw new Error('Failed to get tool schema')
+      return res.json()
+    },
+  },
+  integrations: {
+    // Get all integrations with their connection status
+    list: async (): Promise<{ integrations: IntegrationStatus[] }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations`, { headers })
+      if (!res.ok) throw new Error('Failed to list integrations')
+      return res.json()
+    },
+
+    // Get status for a specific integration
+    getStatus: async (provider: string): Promise<{ connected: boolean; provider: string }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/${provider}/status`, { headers })
+      if (!res.ok) throw new Error(`Failed to get ${provider} status`)
+      return res.json()
+    },
+
+    // Connect an integration with a token
+    connect: async (provider: string, token: string): Promise<{ success: boolean; provider: string; warning?: string }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/${provider}/connect`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ token }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Failed to connect ${provider}`)
+      }
+      return res.json()
+    },
+
+    // Disconnect an integration
+    disconnect: async (provider: string): Promise<{ success: boolean }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/${provider}`, {
+        method: 'DELETE',
+        headers,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Failed to disconnect ${provider}`)
+      }
+      return res.json()
+    },
+
+    // Get requirements for an integration
+    getRequirements: async (provider: string): Promise<IntegrationRequirements> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/${provider}/requirements`, { headers })
+      if (!res.ok) throw new Error(`Failed to get ${provider} requirements`)
+      return res.json()
+    },
+
+    // GitHub-specific endpoints (OAuth flow)
+    getGithubStatus: async (): Promise<{ connected: boolean }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/github/status`, { headers })
+      if (!res.ok) throw new Error('Failed to get GitHub status')
+      return res.json()
+    },
+    getGithubMe: async (): Promise<{ login: string }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/github/me`, { headers })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to get GitHub username')
+      }
+      return res.json()
+    },
+    getGithubOAuthStart: async (): Promise<{ url: string }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/github/oauth/start`, { headers })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to start GitHub OAuth')
+      }
+      return res.json()
+    },
+    disconnectGithub: async (): Promise<void> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/github`, { method: 'DELETE', headers })
+      if (!res.ok) throw new Error('Failed to disconnect GitHub')
+    },
+
+    // Google OAuth endpoints (Gmail, Calendar, Drive)
+    getGoogleOAuthStart: async (service: 'gmail' | 'google-calendar' | 'google-drive'): Promise<{ url: string; service: string }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/google/oauth/start?service=${service}`, { headers })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to start Google OAuth')
+      }
+      return res.json()
+    },
+    getGoogleStatus: async (service: string): Promise<{ connected: boolean; service: string }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/google/${service}/status`, { headers })
+      if (!res.ok) throw new Error(`Failed to get ${service} status`)
+      return res.json()
+    },
+    disconnectGoogle: async (service: string): Promise<void> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/integrations/google/${service}`, { method: 'DELETE', headers })
+      if (!res.ok) throw new Error(`Failed to disconnect ${service}`)
+    },
+  },
+}
+
+// Integration types
+export interface IntegrationStatus {
+  name: string
+  display_name: string
+  connected: boolean
+  auth_type: 'oauth' | 'token' | 'none'
+  icon?: string
+  help_url?: string
+  description?: string
+}
+
+export interface IntegrationRequirements {
+  requires_auth: boolean
+  type: 'oauth' | 'token' | 'none'
+  name: string
+  description: string | null
+  env_var: string | null
+  help_url: string | null
+  required_scopes: string[] | null
+  setup_steps: string[] | null
 }

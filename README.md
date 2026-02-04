@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PromptFlow
 
-## Getting Started
+A natural language interface for building, visualizing, and executing automated workflows using AI agents and browser automation.
 
-First, run the development server:
+## Tech Stack
+
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, ReactFlow
+- **Backend**: FastAPI, Python, Pydantic
+- **Database & Auth**: Supabase (PostgreSQL + Auth)
+- **AI**: Google Gemini 2.0 Flash
+- **Browser Automation**: browser-use + Playwright
+
+## Prerequisites
+
+- Node.js 18+
+- Python 3.9+
+- Supabase account
+- Google AI Studio API key (Gemini)
+
+## Setup
+
+### 1. Install dependencies
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Frontend
+npm install
+
+# Backend
+cd backend
+pip install -r requirements.txt
+cd ..
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Environment variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# Copy templates
+cp env.example .env.local
+cp backend/env.example backend/.env
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Fill in:
+- `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
+- `SUPABASE_SERVICE_KEY` - Your Supabase service key (backend)
+- `GEMINI_API_KEY` - From https://aistudio.google.com
 
-## Learn More
+### 3. Supabase setup
 
-To learn more about Next.js, take a look at the following resources:
+Create these tables in your Supabase project:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `projects` (id, user_id, name, created_at)
+- `workflows` (id, project_id, nodes, edges, version, created_at)
+- `chat_history` (id, project_id, role, content, created_at)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Running
 
-## Deploy on Vercel
+**Terminal 1 - Frontend:**
+```bash
+npm run dev
+# Runs on http://localhost:3000
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Terminal 2 - Backend:**
+```bash
+cd backend
+python main.py
+# Runs on http://localhost:8000
+# API docs at http://localhost:8000/docs
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Usage
+
+1. Open http://localhost:3000
+2. Sign up with email/password
+3. Create a new project
+4. Describe your workflow in natural language (e.g., "Scrape headlines from CNN")
+5. View the generated workflow graph
+6. Click "Run Workflow" to execute
+
+## Project Structure
+
+```
+├── app/                    # Next.js App Router pages
+├── components/             # React components
+│   └── ui/                 # shadcn/ui components
+├── lib/                    # Utilities & API clients
+├── backend/
+│   ├── main.py             # FastAPI app
+│   ├── workflow_generator.py  # AI workflow generation
+│   ├── browser_agent.py    # Browser automation
+│   └── execution_engine.py # Workflow orchestration
+└── public/                 # Static assets
+```
