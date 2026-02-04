@@ -106,41 +106,88 @@ class WorkflowExecutor:
         """
         Recursively resolve ${step_N} and ${node_id} references in values.
         Supports both step-based references (${step_0}) and node_id references (${node-1}).
+        Also supports dot notation for nested access: ${step_1.name}, ${step_1.university}
         """
         import re
 
         if isinstance(value, str):
-            pattern = r'\$\{([^}]+)\}'
+            pattern = r'\$\{\{([^}]+)\}\}|\$\{([^}]+)\}'
             matches = re.findall(pattern, value)
 
             for match in matches:
+                match = match[0] or match[1]
                 resolved_value = None
+                
+                # Check for dot notation (e.g., step_1.name, step_1.university)
+                if "." in match:
+                    parts = match.split(".", 1)
+                    base_ref = parts[0]
+                    property_path = parts[1]
+                    
+                    # Resolve the base reference first
+                    base_value = None
+                    if base_ref in self.context:
+                        base_value = self.context[base_ref]
+                    elif base_ref.startswith("step_"):
+                        try:
+                            step_idx = int(base_ref.split("_")[1])
+                            for node_id, idx in self.step_index_map.items():
+                                if idx == step_idx and node_id in self.context:
+                                    base_value = self.context[node_id]
+                                    break
+                        except (ValueError, IndexError):
+                            pass
+                    
+                    # Now access the nested property
+                    if base_value is not None:
+                        resolved_value = self._get_nested_value(base_value, property_path)
 
-                # First, try direct lookup by node_id
-                if match in self.context:
-                    resolved_value = self.context[match]
-                # Then, try step_N format
-                elif match.startswith("step_"):
-                    try:
-                        step_idx = int(match.split("_")[1])
-                        # Find the node_id for this step index
-                        for node_id, idx in self.step_index_map.items():
-                            if idx == step_idx and node_id in self.context:
-                                resolved_value = self.context[node_id]
+                    # Fallback: if the requested step index doesn't contain the field, scan other step outputs.
+                    # This helps when templates reference the wrong step number (e.g., professor info is in step_0
+                    # but the template uses ${step_1.name}).
+                    if resolved_value is None and base_ref.startswith("step_"):
+                        found = None
+                        for k, v in self.context.items():
+                            if not (isinstance(k, str) and k.startswith("step_")):
+                                continue
+                            candidate = self._get_nested_value(v, property_path)
+                            if candidate is None:
+                                continue
+                            if found is not None and candidate != found:
+                                # Ambiguous; don't guess.
+                                found = None
                                 break
-                    except (ValueError, IndexError):
-                        pass
+                            found = candidate
+                        if found is not None:
+                            resolved_value = found
+                else:
+                    # First, try direct lookup by node_id
+                    if match in self.context:
+                        resolved_value = self.context[match]
+                    # Then, try step_N format
+                    elif match.startswith("step_"):
+                        try:
+                            step_idx = int(match.split("_")[1])
+                            # Find the node_id for this step index
+                            for node_id, idx in self.step_index_map.items():
+                                if idx == step_idx and node_id in self.context:
+                                    resolved_value = self.context[node_id]
+                                    break
+                        except (ValueError, IndexError):
+                            pass
 
                 if resolved_value is not None:
                     if isinstance(resolved_value, str):
                         value = value.replace(f"${{{match}}}", resolved_value)
+                        value = value.replace("${{" + match + "}}", resolved_value)
                     else:
                         # If the entire value is just the reference, return the resolved value directly
-                        if value == f"${{{match}}}":
+                        if value == f"${{{match}}}" or value == "${{" + match + "}}":
                             value = resolved_value
                         else:
                             # Otherwise, convert to string for interpolation
                             value = value.replace(f"${{{match}}}", str(resolved_value))
+                            value = value.replace("${{" + match + "}}", str(resolved_value))
 
             return value
         elif isinstance(value, dict):
@@ -148,6 +195,68 @@ class WorkflowExecutor:
         elif isinstance(value, list):
             return [self._resolve_references(v) for v in value]
         return value
+
+    def _get_nested_value(self, obj: Any, property_path: str) -> Any:
+        """
+        Get a nested value from an object using dot notation.
+        E.g., _get_nested_value({"a": {"b": 1}}, "a.b") returns 1
+        """
+        if obj is None:
+            return None
+        
+        # If obj is a string, try to parse it as JSON first
+        if isinstance(obj, str):
+            raw = obj.strip()
+            if raw.startswith("```"):
+                parts = raw.split("```")
+                if len(parts) >= 3:
+                    raw = parts[1]
+                    if "\n" in raw:
+                        raw = raw.split("\n", 1)[1]
+                    raw = raw.strip()
+
+            # Try to extract the most likely JSON payload from a larger string
+            candidate = raw
+            first_curly = raw.find("{")
+            last_curly = raw.rfind("}")
+            first_square = raw.find("[")
+            last_square = raw.rfind("]")
+            if first_curly != -1 and last_curly != -1 and last_curly > first_curly:
+                candidate = raw[first_curly : last_curly + 1]
+            elif first_square != -1 and last_square != -1 and last_square > first_square:
+                candidate = raw[first_square : last_square + 1]
+
+            import json
+            try:
+                obj = json.loads(candidate)
+            except (json.JSONDecodeError, TypeError):
+                # Some tools/LLMs return python-literal dicts (single quotes). Try parsing safely.
+                try:
+                    import ast
+                    obj = ast.literal_eval(candidate)
+                except (ValueError, SyntaxError):
+                    return None
+        
+        parts = property_path.split(".")
+        current = obj
+        
+        for part in parts:
+            if isinstance(current, dict):
+                current = current.get(part)
+            elif isinstance(current, list):
+                # Try to access by index
+                try:
+                    idx = int(part)
+                    current = current[idx] if 0 <= idx < len(current) else None
+                except (ValueError, IndexError):
+                    return None
+            else:
+                return None
+            
+            if current is None:
+                return None
+        
+        return current
 
     def topological_sort(self) -> List[str]:
         """
@@ -231,6 +340,7 @@ class WorkflowExecutor:
                         self.context[node_id] = mcp_result.get("result")
                     else:
                         result["error"] = mcp_result.get("error")
+                        print(f"[WorkflowExecutor] Tool {tool_name} failed: {mcp_result.get('error')}")
 
             elif node_type == "browser_agent":
                 # Legacy browser_agent support - convert to mcp_tool call
@@ -265,8 +375,59 @@ class WorkflowExecutor:
                 # Resolve references in instruction
                 instruction = self._resolve_references(instruction)
 
-                context_str = "\n".join([f"{k}: {v}" for k, v in inputs.items()])
-                prompt = f"Context:\n{context_str}\n\nTransform/Process according to: {instruction}"
+                # Format input data clearly for the LLM
+                context_parts = []
+                for k, v in inputs.items():
+                    # Get step index for this node if available
+                    step_label = f"Step {self.step_index_map.get(k, k)}" if k in self.step_index_map else k
+                    context_parts.append(f"=== {step_label} Output ===\n{v}")
+                context_str = "\n\n".join(context_parts)
+                
+                print(f"\n{'='*80}")
+                print(f"[AI Transform] Context String for Email Generation:")
+                print(f"{'='*80}")
+                print(context_str)
+                print(f"{'='*80}\n")
+                
+                system_prompt = """You are a helpful AI assistant that transforms and processes data.
+
+CRITICAL RULES - FOLLOW EXACTLY:
+1. NEVER use placeholders: [Professor Name], [Time Slot 1], etc.
+2. NEVER use template syntax: ${step_1.name}, ${variable}, etc.
+3. Extract ACTUAL values from the input data and write them directly
+4. For JSON data: Parse it and extract the real field values
+5. For calendar times: Convert ISO timestamps to readable format like "Monday, February 3 at 9:00 AM"
+6. Output plain text only - no JSON, no markdown, no code blocks, no template variables
+7. Output ONLY the email body text. Do NOT add preamble like "Okay, here's a draft".
+8. Do NOT include a "Subject:" line in the body. Start directly with the greeting (e.g., "Dear ...").
+9. Write from the sender's perspective in first person ("I", "my", "I'd like to").
+
+WRONG EXAMPLES (DO NOT DO THIS):
+❌ "${step_1.name}" - NEVER use template syntax
+❌ "[Professor Name]" - NEVER use brackets
+❌ "2026-02-03T09:00:00-05:00" - NEVER use raw ISO timestamps
+
+CORRECT EXAMPLES:
+✅ "Dr. John Smith" - Extract the actual name
+✅ "Monday, February 3 at 9:00 AM" - Format the datetime
+✅ "Stanford University" - Use the actual university name"""
+
+                prompt = f"""INPUT DATA:
+{context_str}
+
+TASK: {instruction}
+
+CRITICAL INSTRUCTIONS:
+1. Read the input data above carefully
+2. If there is JSON, parse it to extract actual values (names, universities, research topics, dates, etc.)
+3. For calendar events in JSON with "start" field like "2026-02-03T09:00:00-05:00":
+   - Parse the date and time
+   - Format as readable text: "Monday, February 3 at 9:00 AM"
+4. Write your response using ONLY the actual extracted values
+5. DO NOT output any template variables like ${{...}} or placeholders like [...]
+6. Write naturally as if you're a real person composing the message
+
+Extract the actual data from above and complete the task now:"""
 
                 # Retry with exponential backoff for rate limits
                 max_retries = 3
@@ -275,7 +436,10 @@ class WorkflowExecutor:
                         response = await client.aio.models.generate_content(
                             model="gemini-2.0-flash",
                             contents=prompt,
-                            config=types.GenerateContentConfig(temperature=0.7)
+                            config=types.GenerateContentConfig(
+                                temperature=0.7,
+                                system_instruction=system_prompt
+                            )
                         )
                         result["status"] = "success"
                         result["output"] = response.text

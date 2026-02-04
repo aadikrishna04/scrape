@@ -123,7 +123,7 @@ export default function ToolPalette({ tools, servers, onDragStart }: ToolPalette
   })
 
   return (
-    <div className="w-96 border-r border-border bg-card flex flex-col h-full shrink-0">
+    <div className="w-96 border-r border-border bg-card flex flex-col h-full shrink-0 overflow-hidden">
       <div className="px-4 py-4 border-b border-border">
         <h3 className="font-semibold text-sm text-foreground">Tools</h3>
         <p className="text-xs text-muted-foreground mt-1">
@@ -131,7 +131,7 @@ export default function ToolPalette({ tools, servers, onDragStart }: ToolPalette
         </p>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {sortedServers.map((server) => (
           <ServerSection
             key={server.name}

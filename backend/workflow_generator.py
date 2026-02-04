@@ -116,6 +116,25 @@ RULES:
     - For GitHub tools, include "name" (repo name), "owner" (if you can infer or use a placeholder; the system may fill it from the user's account), "description", file "path" and "content" for uploads, etc.
 12. When the user mentions their own repo, account, or "my repository", assume owner will be filled by the system; still set every other param (name, description, file content, path) from the message.
 
+CRITICAL - EMAIL AND USER-FACING CONTENT:
+13. When generating email content (gmail.send_email), write the email body as a COMPLETE, NATURAL email that a real person would send:
+    - Write from the USER's perspective (first person: "I", "my", "I'd like to"), NOT from an AI perspective
+    - DO NOT use raw variable references like ${{step_1.name}} in email bodies - instead, add an ai_transform step BEFORE the email step to compose the full email text using the data
+    - The ai_transform instruction should tell the AI to "Compose a professional, friendly email..." with all the context it needs
+    - Emails should sound human, warm, and personal - not robotic or templated
+    
+14. When using ai_transform to process data for user-facing output (emails, reports, summaries):
+    - NEVER output JSON format for content that will be shown to users or sent in emails
+    - Use plain text or nicely formatted lists (e.g., "Monday, Feb 10 at 9:00 AM - 9:15 AM")
+    - For time slots, format them as human-readable dates and times with day names
+    - The instruction should explicitly say "Format as plain text" or "Format as a readable list" NOT "output as JSON"
+
+15. For workflows involving emails with dynamic data:
+    - Step 1: Gather data (scrape, calendar, etc.)
+    - Step 2: Use ai_transform to compose the COMPLETE email body as natural text, incorporating all the data
+    - Step 3: Send the email with the composed body from step 2
+    - The gmail.send_email "body" param should reference the ai_transform output: "${{step_N}}" where N is the compose step
+
 EXAMPLES:
 
 User: "Scrape the headlines from CNN"
@@ -156,6 +175,26 @@ Response:
       {{"id": "2", "type": "mcp_tool", "tool_name": "github.create_or_update_file", "params": {{"repo": "trial2", "path": "info.txt", "content": "name: aadi age: 19", "message": "Add info.txt via PromptFlow", "branch": "main"}}, "label": "Upload File", "position": {{"x": 350, "y": 200}}}}
     ],
     "edges": [{{"id": "e1", "source": "1", "target": "2"}}]
+  }}
+}}
+
+User: "Scrape professor info, check my calendar, and send an outreach email"
+Response:
+{{
+  "response_type": "workflow_create",
+  "message": "I've created a workflow that scrapes professor information, checks your calendar for availability, and composes a professional outreach email. The AI will write a natural, personalized email using all the gathered data.",
+  "workflow": {{
+    "nodes": [
+      {{"id": "1", "type": "mcp_tool", "tool_name": "browser.execute_instruction", "params": {{"instruction": "Search for professor research information and extract their name, university, and research focus"}}, "label": "Find Professor Info", "position": {{"x": 100, "y": 200}}}},
+      {{"id": "2", "type": "mcp_tool", "tool_name": "calendar.list_events", "params": {{"days_ahead": 7, "calendar_id": "primary"}}, "label": "Check Calendar", "position": {{"x": 350, "y": 200}}}},
+      {{"id": "3", "type": "ai_transform", "instruction": "Using the professor information and calendar events, compose a professional outreach email. Write as if you are the sender reaching out to schedule a meeting. Include: a warm greeting, mention of the professor's research that interests you, 3 available time slots formatted as readable dates (e.g., 'Tuesday, Feb 11 at 2:00 PM'), and a friendly sign-off. Write in first person, natural tone.", "label": "Compose Email", "position": {{"x": 600, "y": 200}}}},
+      {{"id": "4", "type": "mcp_tool", "tool_name": "gmail.send_email", "params": {{"to": "recipient@example.com", "subject": "Research Collaboration Inquiry", "body": "${{step_3}}"}}, "label": "Send Email", "position": {{"x": 850, "y": 200}}}}
+    ],
+    "edges": [
+      {{"id": "e1", "source": "1", "target": "2"}},
+      {{"id": "e2", "source": "2", "target": "3"}},
+      {{"id": "e3", "source": "3", "target": "4"}}
+    ]
   }}
 }}
 

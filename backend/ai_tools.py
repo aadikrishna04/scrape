@@ -163,6 +163,14 @@ class AIToolHandler:
         if not input_data or not instruction:
             return {"success": False, "error": "Both input_data and instruction are required"}
 
+        print(f"\n{'='*80}")
+        print(f"[AI Process Tool] Context String Before Email Generation:")
+        print(f"{'='*80}")
+        print(f"INSTRUCTION: {instruction}")
+        print(f"\nINPUT DATA:")
+        print(input_data)
+        print(f"{'='*80}\n")
+
         format_instructions = {
             "text": "Respond in plain text.",
             "json": "Respond with valid JSON only, no markdown.",

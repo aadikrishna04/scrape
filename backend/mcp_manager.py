@@ -290,10 +290,16 @@ class MCPManager:
         self._user_tokens: Dict[str, str] = {}  # Store user-provided tokens (legacy)
         # Resolver: (user_id, server_name) -> access_token or None (e.g. from DB for GitHub OAuth)
         self._integration_token_resolver: Optional[Callable[[str, str], Optional[str]]] = None
+        # Updater: (user_id, server_name, token_data) -> bool (to save refreshed tokens)
+        self._integration_token_updater: Optional[Callable[[str, str, str], bool]] = None
 
     def set_integration_token_resolver(self, resolver: Callable[[str, str], Optional[str]]) -> None:
         """Set a callable to resolve per-user tokens for integrations (e.g. GitHub OAuth from DB)."""
         self._integration_token_resolver = resolver
+
+    def set_integration_token_updater(self, updater: Callable[[str, str, str], bool]) -> None:
+        """Set a callable to update per-user tokens after refresh."""
+        self._integration_token_updater = updater
 
     def register_internal_tool(
         self,
@@ -534,6 +540,8 @@ class MCPManager:
                 enriched_context["user_id"] = user_id
             if self._integration_token_resolver:
                 enriched_context["_token_resolver"] = self._integration_token_resolver
+            if self._integration_token_updater:
+                enriched_context["_token_updater"] = self._integration_token_updater
             return await handler(params, enriched_context)
 
         # Parse server name from tool name

@@ -26,7 +26,13 @@ from mcp_manager import get_mcp_manager, initialize_mcp_manager, MCPServerConfig
 from mcp_config import INTEGRATION_REQUIREMENTS
 from langgraph_agent import LangGraphAgent, create_agent
 
-load_dotenv()
+_here = os.path.dirname(__file__)
+_backend_env = os.path.join(_here, ".env")
+_root_env_local = os.path.join(os.path.dirname(_here), ".env.local")
+
+# Load backend env first, then optionally load root .env.local (without overriding existing vars)
+load_dotenv(dotenv_path=_backend_env, override=False)
+load_dotenv(dotenv_path=_root_env_local, override=False)
 
 # OAuth state signing (use OAUTH_STATE_SECRET or fall back to service key)
 OAUTH_STATE_SECRET = os.getenv("OAUTH_STATE_SECRET") or os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -78,6 +84,27 @@ def _get_integration_token_from_db(user_id: str, server_name: str) -> Optional[s
     return None
 
 
+def _update_integration_token_in_db(user_id: str, server_name: str, token_data: str) -> bool:
+    """Update the integration token in DB after a refresh."""
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        supabase_admin.table("user_integration_tokens").upsert(
+            {
+                "user_id": user_id,
+                "provider": server_name,
+                "access_token": token_data,
+                "updated_at": now,
+            },
+            on_conflict="user_id,provider",
+        ).execute()
+        print(f"[TokenUpdater] Updated token for {server_name}, user_id={user_id[:8]}...")
+        return True
+    except Exception as e:
+        print(f"[TokenUpdater] Failed to update token: {e}")
+        return False
+
+
 async def _get_github_login_for_user(user_id: str) -> Optional[str]:
     """Return the GitHub username (login) for the given user if they have GitHub connected. Used to prefill owner in workflows."""
     token = _get_integration_token_from_db(user_id, "github")
@@ -122,6 +149,7 @@ async def lifespan(app: FastAPI):
     print("Initializing MCP Manager...")
     await initialize_mcp_manager()
     get_mcp_manager().set_integration_token_resolver(_get_integration_token_from_db)
+    get_mcp_manager().set_integration_token_updater(_update_integration_token_in_db)
     print("MCP Manager initialized")
     yield
     # Shutdown: Clean up MCP connections
@@ -1597,6 +1625,8 @@ async def execute_workflow_stream(project_id: str, request: Request):
     async def event_generator():
         """Generate SSE events from workflow execution."""
         event_queue = asyncio.Queue()
+        last_event_at = time.time()
+        keepalive_interval_seconds = 25.0
 
         async def stream_callback(event: Dict[str, Any]):
             """Callback for execution events."""
@@ -1683,9 +1713,10 @@ async def execute_workflow_stream(project_id: str, request: Request):
         # Yield events as they come in
         while True:
             try:
-                event = await asyncio.wait_for(event_queue.get(), timeout=60.0)
+                event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
                 event_type = event.get("type")
                 event_data = event.get("data")
+                last_event_at = time.time()
 
                 if event_type == "node_status_change":
                     yield {
@@ -1709,11 +1740,29 @@ async def execute_workflow_stream(project_id: str, request: Request):
                     break
 
             except asyncio.TimeoutError:
-                yield {
-                    "event": "error",
-                    "data": json.dumps({"error": "Execution timed out"})
-                }
-                break
+                # If the workflow task has finished, return its error (if any) or stop.
+                if workflow_task.done():
+                    err = None
+                    try:
+                        workflow_task.result()
+                    except Exception as e:
+                        err = str(e)
+
+                    yield {
+                        "event": "error" if err else "done",
+                        "data": json.dumps({"error": err} if err else {"status": "completed", "results": [], "chat_message": ""})
+                    }
+                    break
+
+                # Otherwise, keep the SSE connection alive during long-running steps.
+                now = time.time()
+                if now - last_event_at >= keepalive_interval_seconds:
+                    last_event_at = now
+                    yield {
+                        "event": "keepalive",
+                        "data": json.dumps({"ts": datetime.now(timezone.utc).isoformat()})
+                    }
+                continue
 
         # Ensure workflow task is complete
         if not workflow_task.done():

@@ -20,10 +20,49 @@ CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 
 
+async def _refresh_google_token(refresh_token: str) -> Optional[Dict[str, Any]]:
+    """Refresh an expired Google access token using the refresh token."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        print("[GoogleAuth] Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET for token refresh")
+        return None
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"[GoogleAuth] Token refreshed successfully")
+                return {
+                    "access_token": data.get("access_token"),
+                    "expires_in": data.get("expires_in"),
+                    "refresh_token": refresh_token,  # Keep the original refresh token
+                }
+            else:
+                print(f"[GoogleAuth] Token refresh failed: {response.status_code} - {response.text}")
+                return None
+    except Exception as e:
+        print(f"[GoogleAuth] Token refresh error: {e}")
+        return None
+
+
 async def _get_access_token(context: Optional[Dict[str, Any]], provider: str) -> Optional[str]:
     """
     Get OAuth access token from context.
     The context should contain 'user_id' and the token resolver will be called.
+    If the token is expired, it will be refreshed using the refresh token.
     """
     if not context:
         print(f"[GoogleAuth] No context provided for {provider}")
@@ -36,6 +75,7 @@ async def _get_access_token(context: Optional[Dict[str, Any]], provider: str) ->
 
     # Try to get token via resolver in context
     token_resolver = context.get("_token_resolver")
+    token_updater = context.get("_token_updater")
     user_id = context.get("user_id")
 
     print(f"[GoogleAuth] Looking up token for {provider}, user_id={user_id[:8] if user_id else 'None'}...")
@@ -49,7 +89,16 @@ async def _get_access_token(context: Optional[Dict[str, Any]], provider: str) ->
                 try:
                     parsed = json.loads(token_data)
                     access_token = parsed.get("access_token", token_data)
+                    refresh_token = parsed.get("refresh_token")
                     print(f"[GoogleAuth] Parsed access_token (length: {len(access_token) if access_token else 0})")
+                    
+                    # Test if token is valid by making a simple request
+                    # We'll do this lazily - if the actual API call fails with 401, we refresh
+                    # Store refresh_token in context for potential refresh
+                    if refresh_token:
+                        context[f"_{provider}_refresh_token"] = refresh_token
+                        context[f"_{provider}_parsed_token"] = parsed
+                    
                     return access_token
                 except json.JSONDecodeError:
                     return token_data
@@ -59,6 +108,37 @@ async def _get_access_token(context: Optional[Dict[str, Any]], provider: str) ->
     else:
         print(f"[GoogleAuth] Missing resolver or user_id: resolver={token_resolver is not None}, user_id={user_id is not None}")
 
+    return None
+
+
+async def _get_access_token_with_refresh(context: Optional[Dict[str, Any]], provider: str) -> Optional[str]:
+    """
+    Get access token, refreshing if necessary.
+    This should be called after a 401 error to attempt token refresh.
+    """
+    if not context:
+        return None
+    
+    refresh_token = context.get(f"_{provider}_refresh_token")
+    if not refresh_token:
+        print(f"[GoogleAuth] No refresh token available for {provider}")
+        return None
+    
+    print(f"[GoogleAuth] Attempting to refresh token for {provider}")
+    new_tokens = await _refresh_google_token(refresh_token)
+    
+    if new_tokens and new_tokens.get("access_token"):
+        # Update the stored token if we have an updater
+        token_updater = context.get("_token_updater")
+        user_id = context.get("user_id")
+        
+        if token_updater and user_id:
+            token_data = json.dumps(new_tokens)
+            token_updater(user_id, provider, token_data)
+            print(f"[GoogleAuth] Updated stored token for {provider}")
+        
+        return new_tokens["access_token"]
+    
     return None
 
 
@@ -222,20 +302,8 @@ def get_gmail_tools() -> List[MCPTool]:
     ]
 
 
-async def handle_gmail_tool(
-    tool_name: str,
-    params: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Handle Gmail tool calls."""
-    print(f"[Gmail] Handling {tool_name}")
-    print(f"[Gmail] Context keys: {list(context.keys()) if context else 'None'}")
-
-    token = await _get_access_token(context, "gmail")
-    if not token:
-        print("[Gmail] No token found!")
-        return {"success": False, "error": "Gmail not connected. Please connect Gmail in Settings → Integrations."}
-
+async def _execute_gmail_tool(tool_name: str, token: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute a Gmail tool with the given token."""
     if tool_name == "gmail.list_emails":
         return await _gmail_list_emails(token, params)
     elif tool_name == "gmail.read_email":
@@ -244,8 +312,37 @@ async def handle_gmail_tool(
         return await _gmail_send_email(token, params)
     elif tool_name == "gmail.reply_to_email":
         return await _gmail_reply_to_email(token, params)
-
     return {"success": False, "error": f"Unknown Gmail tool: {tool_name}"}
+
+
+async def handle_gmail_tool(
+    tool_name: str,
+    params: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Handle Gmail tool calls with automatic token refresh on expiry."""
+    print(f"[Gmail] Handling {tool_name}")
+    print(f"[Gmail] Context keys: {list(context.keys()) if context else 'None'}")
+
+    token = await _get_access_token(context, "gmail")
+    if not token:
+        print("[Gmail] No token found!")
+        return {"success": False, "error": "Gmail not connected. Please connect Gmail in Settings → Integrations."}
+
+    # Try the request
+    result = await _execute_gmail_tool(tool_name, token, params)
+    
+    # If token expired, try to refresh and retry
+    if not result.get("success") and "Token expired" in str(result.get("error", "")):
+        print("[Gmail] Token expired, attempting refresh...")
+        new_token = await _get_access_token_with_refresh(context, "gmail")
+        if new_token:
+            print("[Gmail] Token refreshed, retrying request...")
+            result = await _execute_gmail_tool(tool_name, new_token, params)
+        else:
+            print("[Gmail] Token refresh failed")
+    
+    return result
 
 
 async def _gmail_list_emails(token: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -573,24 +670,43 @@ def get_calendar_tools() -> List[MCPTool]:
     ]
 
 
-async def handle_calendar_tool(
-    tool_name: str,
-    params: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Handle Calendar tool calls."""
-    token = await _get_access_token(context, "google-calendar")
-    if not token:
-        return {"success": False, "error": "Google Calendar not connected. Please connect it in Settings → Integrations."}
-
+async def _execute_calendar_tool(tool_name: str, token: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute a Calendar tool with the given token."""
     if tool_name == "calendar.list_events":
         return await _calendar_list_events(token, params)
     elif tool_name == "calendar.create_event":
         return await _calendar_create_event(token, params)
     elif tool_name == "calendar.delete_event":
         return await _calendar_delete_event(token, params)
-
     return {"success": False, "error": f"Unknown Calendar tool: {tool_name}"}
+
+
+async def handle_calendar_tool(
+    tool_name: str,
+    params: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Handle Calendar tool calls with automatic token refresh on expiry."""
+    print(f"[Calendar] Handling {tool_name}")
+    
+    token = await _get_access_token(context, "google-calendar")
+    if not token:
+        return {"success": False, "error": "Google Calendar not connected. Please connect it in Settings → Integrations."}
+
+    # Try the request
+    result = await _execute_calendar_tool(tool_name, token, params)
+    
+    # If token expired, try to refresh and retry
+    if not result.get("success") and "Token expired" in str(result.get("error", "")):
+        print("[Calendar] Token expired, attempting refresh...")
+        new_token = await _get_access_token_with_refresh(context, "google-calendar")
+        if new_token:
+            print("[Calendar] Token refreshed, retrying request...")
+            result = await _execute_calendar_tool(tool_name, new_token, params)
+        else:
+            print("[Calendar] Token refresh failed")
+    
+    return result
 
 
 async def _calendar_list_events(token: str, params: Dict[str, Any]) -> Dict[str, Any]:

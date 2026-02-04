@@ -372,7 +372,8 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
             onChatUpdate?.()
           } else if (event.type === 'error') {
             setRunStatus('failed')
-            toast.error('Failed to execute workflow')
+            const errorMsg = (event.data as any)?.error
+            toast.error(errorMsg ? `Failed to execute workflow: ${errorMsg}` : 'Failed to execute workflow')
             nodeIds.forEach((id) => updateNodeStatus(id, 'failed'))
             onChatUpdate?.()
           }
@@ -382,7 +383,8 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
       console.error('Execution error:', error)
       setRunStatus('failed')
       nodeIds.forEach((id) => updateNodeStatus(id, 'failed'))
-      toast.error('Failed to execute workflow')
+      const msg = error instanceof Error ? error.message : String(error)
+      toast.error(msg ? `Failed to execute workflow: ${msg}` : 'Failed to execute workflow')
       onChatUpdate?.()
     } finally {
       setIsRunning(false)
@@ -394,7 +396,7 @@ function WorkflowPanelInner({ projectId, version, onChatUpdate, onWorkflowChange
   }
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 overflow-hidden">
       {/* Tool Palette */}
       {showPalette && (
         <ToolPalette

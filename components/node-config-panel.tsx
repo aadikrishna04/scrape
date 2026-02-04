@@ -146,7 +146,7 @@ export default function NodeConfigPanel({
   }
 
   return (
-    <div className="w-80 border-l border-border bg-card flex flex-col h-full">
+    <div className="w-80 border-l border-border bg-card flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="px-4 py-4 border-b border-border flex justify-between items-start">
         <div className="min-w-0">
@@ -160,7 +160,7 @@ export default function NodeConfigPanel({
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-5">
           {/* Label */}
           <div className="space-y-2">
