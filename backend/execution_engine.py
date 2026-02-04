@@ -40,7 +40,7 @@ def fill_github_defaults_at_runtime(tool_name: str, params: Dict[str, Any], cont
                 filename = path.split("/")[-1] if "/" in path else path
             else:
                 filename = "files"
-            params["message"] = f"Add {filename} via PromptFlow"
+            params["message"] = f"Add {filename} via Sentric"
 
         # Try to infer repo from context (previous node outputs)
         if "repo" not in params or not params["repo"]:
@@ -59,21 +59,21 @@ def fill_github_defaults_at_runtime(tool_name: str, params: Dict[str, Any], cont
     # For repository creation
     if tool_name == "github.create_repository":
         if "description" not in params or not params["description"]:
-            params["description"] = "Created by PromptFlow"
+            params["description"] = "Created by Sentric"
         if "private" not in params:
             params["private"] = False
 
     # For creating issues
     if tool_name == "github.create_issue":
         if "body" not in params or not params["body"]:
-            params["body"] = params.get("title", "Issue created via PromptFlow")
+            params["body"] = params.get("title", "Issue created via Sentric")
 
     # For creating PRs
     if tool_name == "github.create_pull_request":
         if "base" not in params or not params["base"]:
             params["base"] = "main"
         if "body" not in params or not params["body"]:
-            params["body"] = params.get("title", "Pull request created via PromptFlow")
+            params["body"] = params.get("title", "Pull request created via Sentric")
 
     return params
 
@@ -92,15 +92,18 @@ class WorkflowExecutor:
         self.user_id = user_id
         self.stream_callback = stream_callback
 
-    async def _notify_status(self, node_id: str, status: str):
-        """Notify stream callback of node status change."""
+    async def _notify_status(self, node_id: str, status: str, extra: Dict[str, Any] = None):
+        """Notify stream callback of node status change with optional extra data."""
         print(f"[WorkflowExecutor] Notifying status: node_id={node_id}, status={status}")
         if self.stream_callback:
-            await self.stream_callback({
+            event = {
                 "type": "node_status_change",
                 "node_id": node_id,
                 "status": status
-            })
+            }
+            if extra:
+                event.update(extra)
+            await self.stream_callback(event)
 
     def _resolve_references(self, value: Any) -> Any:
         """
@@ -313,28 +316,35 @@ class WorkflowExecutor:
             "label": node.get("label", node.get("data", {}).get("label", node_id))
         }
 
+        # Get tool info for logging
+        tool_name = node.get("tool_name", node.get("data", {}).get("tool_name", ""))
+        params = node.get("params", node.get("data", {}).get("params", {}))
+
         # Notify that this node is now executing
-        await self._notify_status(node_id, "executing")
+        await self._notify_status(node_id, "executing", {
+            "tool_name": tool_name,
+            "params": params,
+            "label": result.get("label", "")
+        })
 
         try:
             if node_type == "mcp_tool":
                 # Execute via MCP Manager
-                tool_name = node.get("tool_name", node.get("data", {}).get("tool_name"))
-                params = node.get("params", node.get("data", {}).get("params", {}))
-
                 if not tool_name:
                     result["status"] = "error"
                     result["error"] = "No tool_name specified"
                 else:
                     # Resolve ${step_N} and ${node_id} references in params
-                    params = self._resolve_references(params)
-                    print(f"[WorkflowExecutor] Resolved params for {tool_name}: {str(params)[:500]}")
+                    resolved_params = self._resolve_references(params)
+                    print(f"[WorkflowExecutor] Resolved params for {tool_name}: {str(resolved_params)[:500]}")
 
                     # Fill in smart defaults for GitHub tools at runtime
-                    params = fill_github_defaults_at_runtime(tool_name, params, self.context)
-                    mcp_result = await self.mcp_manager.call_tool(tool_name, params, inputs, user_id=self.user_id)
+                    resolved_params = fill_github_defaults_at_runtime(tool_name, resolved_params, self.context)
+                    mcp_result = await self.mcp_manager.call_tool(tool_name, resolved_params, inputs, user_id=self.user_id)
                     result["status"] = "success" if mcp_result.get("success") else "failed"
                     result["output"] = mcp_result.get("result", mcp_result.get("error", "No output"))
+                    result["tool_name"] = tool_name
+                    result["params"] = resolved_params
 
                     if mcp_result.get("success"):
                         self.context[node_id] = mcp_result.get("result")
@@ -486,9 +496,22 @@ Extract the actual data from above and complete the task now:"""
             result["status"] = "error"
             result["error"] = str(e)
 
-        # Notify that this node has completed
+        # Notify that this node has completed with result details
         final_status = "success" if result["status"] == "success" else "failed"
-        await self._notify_status(node_id, final_status)
+        extra_data = {
+            "tool_name": result.get("tool_name", tool_name),
+            "label": result.get("label", "")
+        }
+        if result.get("output"):
+            # Truncate output for logging
+            output = result["output"]
+            if isinstance(output, str) and len(output) > 500:
+                output = output[:500] + "..."
+            extra_data["result"] = output
+        if result.get("error"):
+            extra_data["error"] = result["error"]
+
+        await self._notify_status(node_id, final_status, extra_data)
 
         self.execution_log.append(result)
         return result

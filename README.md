@@ -1,4 +1,4 @@
-# PromptFlow
+# Sentric
 
 A natural language interface for building, visualizing, and executing automated workflows using AI agents and browser automation.
 
@@ -40,6 +40,7 @@ cp backend/env.example backend/.env
 ```
 
 Fill in:
+
 - `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
 - `SUPABASE_SERVICE_KEY` - Your Supabase service key (backend)
@@ -56,12 +57,14 @@ Create these tables in your Supabase project:
 ## Running
 
 **Terminal 1 - Frontend:**
+
 ```bash
 npm run dev
 # Runs on http://localhost:3000
 ```
 
 **Terminal 2 - Backend:**
+
 ```bash
 cd backend
 python main.py

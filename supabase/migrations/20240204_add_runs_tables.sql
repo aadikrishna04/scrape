@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS run_events (
   step_number INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
 
 -- Analysis findings (for future LLM analysis)
 CREATE TABLE IF NOT EXISTS analysis_findings (

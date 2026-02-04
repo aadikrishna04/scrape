@@ -1,5 +1,5 @@
 """
-LangGraph Agent - Core agentic system for PromptFlow
+LangGraph Agent - Core agentic system for Sentric
 """
 import os
 import json
@@ -77,7 +77,7 @@ def create_llm(temperature: float = 0.1) -> ChatGoogleGenerativeAI:
 
 class LangGraphAgent:
     """
-    LangGraph-based agent for PromptFlow.
+    LangGraph-based agent for Sentric.
 
     Nodes:
     - router: Classify user intent
@@ -287,7 +287,7 @@ Respond with ONLY one of: conversation, workflow_create, workflow_modify, execut
         messages = state.get("messages", [])
         streaming_callback = state.get("streaming_callback")
 
-        system_prompt = f"""You are PromptFlow, an AI assistant that helps users build and execute automated workflows.
+        system_prompt = f"""You are Sentric, an AI assistant that helps users build and execute automated workflows.
 
 You have access to these tools:
 {self.tool_descriptions}

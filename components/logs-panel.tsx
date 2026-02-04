@@ -9,12 +9,23 @@ import {
   XCircle,
   Loader2,
   ChevronRight,
+  ChevronDown,
   Play,
   AlertCircle,
   Activity,
-  FileText
+  FileText,
+  Sparkles,
+  AlertTriangle,
+  Info,
+  Shield,
+  Zap,
+  Bug,
+  Database,
+  Settings,
+  RefreshCw
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { Button } from '@/components/ui/button'
 
 interface Run {
   id: string
@@ -39,6 +50,15 @@ interface RunDetail extends Run {
   events: RunEvent[]
 }
 
+interface AnalysisFinding {
+  id?: string
+  severity: 'low' | 'medium' | 'high'
+  category: string
+  description: string
+  evidence: string[]
+  created_at?: string
+}
+
 interface LogsPanelProps {
   projectId: string
 }
@@ -53,9 +73,22 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
   const [totalRuns, setTotalRuns] = useState(0)
   const [runsError, setRunsError] = useState<string | null>(null)
 
+  // Analysis state
+  const [findings, setFindings] = useState<AnalysisFinding[]>([])
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [expandedFindings, setExpandedFindings] = useState<Set<number>>(new Set())
+
   useEffect(() => {
     loadRuns()
   }, [projectId, page])
+
+  // Load analysis when tab changes or run is selected
+  useEffect(() => {
+    if (selectedRun && activeTab === 'analysis') {
+      loadAnalysis(selectedRun.id)
+    }
+  }, [selectedRun, activeTab])
 
   const loadRuns = async () => {
     try {
@@ -68,7 +101,7 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
       console.error('Failed to load runs:', error)
       setRuns([])
       setTotalRuns(0)
-      setRunsError('Couldn’t load runs. Make sure the backend is running and the runs migration is applied.')
+      setRunsError('Couldn\'t load runs. Make sure the backend is running and the runs migration is applied.')
     } finally {
       setIsLoadingRuns(false)
     }
@@ -79,6 +112,7 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
       setIsLoadingDetail(true)
       const data = await api.runs.get(runId)
       setSelectedRun(data)
+      setFindings([]) // Reset findings when selecting a new run
     } catch (error) {
       console.error('Failed to load run detail:', error)
     } finally {
@@ -86,8 +120,46 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
     }
   }
 
+  const loadAnalysis = async (runId: string) => {
+    try {
+      setIsLoadingAnalysis(true)
+      const data = await api.runs.getAnalysis(runId)
+      setFindings(data.findings ?? [])
+    } catch (error) {
+      console.error('Failed to load analysis:', error)
+      setFindings([])
+    } finally {
+      setIsLoadingAnalysis(false)
+    }
+  }
+
+  const triggerAnalysis = async () => {
+    if (!selectedRun) return
+    try {
+      setIsAnalyzing(true)
+      const data = await api.runs.analyze(selectedRun.id)
+      setFindings(data.findings ?? [])
+    } catch (error) {
+      console.error('Failed to analyze run:', error)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   const handleSelectRun = (run: Run) => {
     loadRunDetail(run.id)
+  }
+
+  const toggleFindingExpanded = (index: number) => {
+    setExpandedFindings(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) {
+        next.delete(index)
+      } else {
+        next.add(index)
+      }
+      return next
+    })
   }
 
   const getStatusIcon = (status: Run['status']) => {
@@ -141,6 +213,48 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
     }
   }
 
+  const getSeverityConfig = (severity: AnalysisFinding['severity']) => {
+    switch (severity) {
+      case 'high':
+        return {
+          icon: <AlertCircle className="w-4 h-4" />,
+          bgColor: 'bg-red-500/10',
+          borderColor: 'border-red-500/30',
+          textColor: 'text-red-400',
+          badgeBg: 'bg-red-500/20',
+          label: 'High'
+        }
+      case 'medium':
+        return {
+          icon: <AlertTriangle className="w-4 h-4" />,
+          bgColor: 'bg-amber-500/10',
+          borderColor: 'border-amber-500/30',
+          textColor: 'text-amber-400',
+          badgeBg: 'bg-amber-500/20',
+          label: 'Medium'
+        }
+      case 'low':
+      default:
+        return {
+          icon: <Info className="w-4 h-4" />,
+          bgColor: 'bg-blue-500/10',
+          borderColor: 'border-blue-500/30',
+          textColor: 'text-blue-400',
+          badgeBg: 'bg-blue-500/20',
+          label: 'Low'
+        }
+    }
+  }
+
+  const getCategoryIcon = (category: string) => {
+    const cat = category.toLowerCase()
+    if (cat.includes('performance')) return <Zap className="w-3.5 h-3.5" />
+    if (cat.includes('error')) return <Bug className="w-3.5 h-3.5" />
+    if (cat.includes('security')) return <Shield className="w-3.5 h-3.5" />
+    if (cat.includes('data')) return <Database className="w-3.5 h-3.5" />
+    return <Settings className="w-3.5 h-3.5" />
+  }
+
   const formatDuration = (start: string, end: string | null) => {
     if (!end) return 'In progress...'
     const startDate = new Date(start)
@@ -151,12 +265,28 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
     return `${Math.floor(diffMs / 60000)}m ${Math.floor((diffMs % 60000) / 1000)}s`
   }
 
+  // Count findings by severity
+  const severityCounts = findings.reduce((acc, f) => {
+    acc[f.severity] = (acc[f.severity] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
   return (
     <div className="flex h-full">
       {/* Left Panel - Run List */}
       <div className="w-80 border-r border-border bg-card flex flex-col">
         <div className="p-4 border-b border-border">
-          <h2 className="text-sm font-medium text-foreground">Execution History</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-foreground">Execution History</h2>
+            <button
+              onClick={loadRuns}
+              disabled={isLoadingRuns}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+              title="Refresh runs"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5 text-muted-foreground", isLoadingRuns && "animate-spin")} />
+            </button>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             {totalRuns} total run{totalRuns !== 1 ? 's' : ''}
           </p>
@@ -272,14 +402,20 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
               </button>
               <button
                 className={cn(
-                  "px-4 py-2.5 text-sm font-medium transition-colors",
+                  "px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2",
                   activeTab === "analysis"
                     ? "border-b-2 border-accent text-white"
                     : "text-muted-foreground hover:text-white"
                 )}
                 onClick={() => setActiveTab("analysis")}
               >
+                <Sparkles className="w-3.5 h-3.5" />
                 Analysis
+                {findings.length > 0 && (
+                  <span className="px-1.5 py-0.5 text-xs rounded-full bg-accent/20 text-accent">
+                    {findings.length}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -337,6 +473,9 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
                                     {event.payload.tool_name && (
                                       <p><span className="text-accent">Tool:</span> {event.payload.tool_name}</p>
                                     )}
+                                    {event.payload.label && (
+                                      <p><span className="text-accent">Label:</span> {event.payload.label}</p>
+                                    )}
                                     {event.payload.node_id && (
                                       <p><span className="text-accent">Node:</span> {event.payload.node_id}</p>
                                     )}
@@ -379,12 +518,153 @@ export default function LogsPanel({ projectId }: LogsPanelProps) {
                   )}
                 </div>
               ) : (
-                <div className="text-center py-12">
-                  <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">Analysis coming soon</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    AI-powered insights about your workflow executions
-                  </p>
+                /* Analysis Tab */
+                <div className="space-y-4">
+                  {/* Analysis Header */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-medium text-foreground">AI Analysis</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Automated insights about this workflow execution
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={triggerAnalysis}
+                      disabled={isAnalyzing || selectedRun.status === 'running'}
+                      className="gap-2"
+                    >
+                      {isAnalyzing ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          {findings.length > 0 ? 'Re-analyze' : 'Run Analysis'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Severity Summary */}
+                  {findings.length > 0 && (
+                    <div className="flex gap-3">
+                      {severityCounts.high && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/20">
+                          <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                          <span className="text-xs font-medium text-red-400">{severityCounts.high} High</span>
+                        </div>
+                      )}
+                      {severityCounts.medium && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                          <span className="text-xs font-medium text-amber-400">{severityCounts.medium} Medium</span>
+                        </div>
+                      )}
+                      {severityCounts.low && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20">
+                          <Info className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="text-xs font-medium text-blue-400">{severityCounts.low} Low</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Loading State */}
+                  {isLoadingAnalysis && (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+
+                  {/* No Findings */}
+                  {!isLoadingAnalysis && findings.length === 0 && (
+                    <div className="text-center py-12 border border-dashed border-border rounded-lg">
+                      <Sparkles className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium text-foreground">No analysis yet</p>
+                      <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
+                        Click "Run Analysis" to generate AI-powered insights about this workflow execution
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Findings List */}
+                  {!isLoadingAnalysis && findings.length > 0 && (
+                    <div className="space-y-3">
+                      {findings.map((finding, index) => {
+                        const config = getSeverityConfig(finding.severity)
+                        const isExpanded = expandedFindings.has(index)
+
+                        return (
+                          <div
+                            key={finding.id || index}
+                            className={cn(
+                              "rounded-lg border p-4 transition-colors",
+                              config.bgColor,
+                              config.borderColor
+                            )}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={cn("mt-0.5", config.textColor)}>
+                                {config.icon}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded text-xs font-medium",
+                                    config.badgeBg,
+                                    config.textColor
+                                  )}>
+                                    {config.label}
+                                  </span>
+                                  <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/50 text-xs text-muted-foreground">
+                                    {getCategoryIcon(finding.category)}
+                                    {finding.category}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-foreground mt-2">
+                                  {finding.description}
+                                </p>
+
+                                {/* Evidence */}
+                                {finding.evidence && finding.evidence.length > 0 && (
+                                  <div className="mt-3">
+                                    <button
+                                      onClick={() => toggleFindingExpanded(index)}
+                                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronDown className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <ChevronRight className="w-3.5 h-3.5" />
+                                      )}
+                                      {finding.evidence.length} supporting detail{finding.evidence.length !== 1 ? 's' : ''}
+                                    </button>
+
+                                    {isExpanded && (
+                                      <ul className="mt-2 space-y-1.5 pl-5">
+                                        {finding.evidence.map((item, i) => (
+                                          <li
+                                            key={i}
+                                            className="text-xs text-muted-foreground list-disc"
+                                          >
+                                            {item}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

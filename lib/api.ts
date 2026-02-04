@@ -397,6 +397,21 @@ export const api = {
       if (!res.ok) throw new Error('Failed to get run')
       return res.json()
     },
+    getAnalysis: async (runId: string): Promise<{ findings: AnalysisFinding[] }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/runs/${runId}/analysis`, { headers })
+      if (!res.ok) return { findings: [] }
+      return res.json()
+    },
+    analyze: async (runId: string): Promise<{ findings: AnalysisFinding[] }> => {
+      const headers = await getAuthHeader()
+      const res = await fetch(`${API_URL}/runs/${runId}/analyze`, {
+        method: 'POST',
+        headers
+      })
+      if (!res.ok) throw new Error('Failed to analyze run')
+      return res.json()
+    },
   },
   integrations: {
     // Get all integrations with their connection status
@@ -530,6 +545,15 @@ export interface RunEvent {
 
 export interface RunDetail extends Run {
   events: RunEvent[]
+}
+
+export interface AnalysisFinding {
+  id?: string
+  severity: 'low' | 'medium' | 'high'
+  category: string
+  description: string
+  evidence: string[]
+  created_at?: string
 }
 
 // Integration types

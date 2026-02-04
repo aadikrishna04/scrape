@@ -35,7 +35,7 @@ def build_system_prompt(available_tools: Optional[List[Dict]] = None) -> str:
 
         tools_section = "\n\nAVAILABLE MCP TOOLS:\n" + "\n".join(tool_descriptions)
 
-    return f"""You are a workflow generation assistant for PromptFlow, an AI-powered workflow builder.
+    return f"""You are a workflow generation assistant for Sentric, an AI-powered workflow builder.
 Your job is to analyze user messages and either:
 1. Generate a workflow from their description
 2. Modify an existing workflow based on their request
@@ -171,8 +171,8 @@ Response:
   "message": "I've created a workflow to create a new GitHub repository named 'trial2' and upload a file with your content. Ensure GitHub is connected in Settings, then run the workflow.",
   "workflow": {{
     "nodes": [
-      {{"id": "1", "type": "mcp_tool", "tool_name": "github.create_repository", "params": {{"name": "trial2", "description": "Created by PromptFlow", "private": false}}, "label": "Create GitHub Repo", "position": {{"x": 100, "y": 200}}}},
-      {{"id": "2", "type": "mcp_tool", "tool_name": "github.create_or_update_file", "params": {{"repo": "trial2", "path": "info.txt", "content": "name: aadi age: 19", "message": "Add info.txt via PromptFlow", "branch": "main"}}, "label": "Upload File", "position": {{"x": 350, "y": 200}}}}
+      {{"id": "1", "type": "mcp_tool", "tool_name": "github.create_repository", "params": {{"name": "trial2", "description": "Created by Sentric", "private": false}}, "label": "Create GitHub Repo", "position": {{"x": 100, "y": 200}}}},
+      {{"id": "2", "type": "mcp_tool", "tool_name": "github.create_or_update_file", "params": {{"repo": "trial2", "path": "info.txt", "content": "name: aadi age: 19", "message": "Add info.txt via Sentric", "branch": "main"}}, "label": "Upload File", "position": {{"x": 350, "y": 200}}}}
     ],
     "edges": [{{"id": "e1", "source": "1", "target": "2"}}]
   }}
@@ -200,7 +200,7 @@ Response:
 
 CRITICAL - GITHUB TOOL DEFAULTS:
 For GitHub file operations (create_or_update_file, push_files), ALWAYS include:
-- "message": A descriptive commit message like "Add <filename> via PromptFlow" or "Update <filename>"
+- "message": A descriptive commit message like "Add <filename> via Sentric" or "Update <filename>"
 - "branch": Default to "main" unless the user specifies otherwise
 - "repo": The repository name
 - "path": The file path (e.g., "data.txt", "src/config.json")
@@ -208,7 +208,7 @@ For GitHub file operations (create_or_update_file, push_files), ALWAYS include:
 
 For GitHub repository creation (create_repository), include:
 - "name": Repository name (REQUIRED)
-- "description": A brief description (default: "Created by PromptFlow")
+- "description": A brief description (default: "Created by Sentric")
 - "private": false unless user specifies private
 
 (For GitHub tools, omit "owner" when it is the user's own repo; the system will prefill it from their connected account. Always fill name, repo, path, content, description, message, branch from the user message using the exact parameter names from the tool schema.)
@@ -337,7 +337,7 @@ def fill_github_defaults(tool_name: str, params: Dict[str, Any], all_nodes: List
                 filename = path.split("/")[-1] if "/" in path else path
             else:
                 filename = "files"
-            params["message"] = f"Add {filename} via PromptFlow"
+            params["message"] = f"Add {filename} via Sentric"
 
         # Try to infer repo from previous create_repository node if missing
         if "repo" not in params or not params["repo"]:
@@ -351,21 +351,21 @@ def fill_github_defaults(tool_name: str, params: Dict[str, Any], all_nodes: List
     # For repository creation
     if tool_name == "github.create_repository":
         if "description" not in params or not params["description"]:
-            params["description"] = "Created by PromptFlow"
+            params["description"] = "Created by Sentric"
         if "private" not in params:
             params["private"] = False
 
     # For creating issues
     if tool_name == "github.create_issue":
         if "body" not in params or not params["body"]:
-            params["body"] = params.get("title", "Issue created via PromptFlow")
+            params["body"] = params.get("title", "Issue created via Sentric")
 
     # For creating PRs
     if tool_name == "github.create_pull_request":
         if "base" not in params or not params["base"]:
             params["base"] = "main"
         if "body" not in params or not params["body"]:
-            params["body"] = params.get("title", "Pull request created via PromptFlow")
+            params["body"] = params.get("title", "Pull request created via Sentric")
 
     return params
 

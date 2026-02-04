@@ -87,7 +87,7 @@ INTEGRATION_REQUIREMENTS = {
         setup_steps=[
             "Go to notion.so/my-integrations",
             "Click '+ New integration'",
-            "Name it (e.g., 'PromptFlow') and select your workspace",
+            "Name it (e.g., 'Sentric') and select your workspace",
             "Under 'Capabilities', enable: Read content, Insert content, Update content",
             "Click 'Submit' and copy the 'Internal Integration Token'",
             "IMPORTANT: Share pages/databases with the integration (click '...' → 'Add connections')"
@@ -118,7 +118,7 @@ INTEGRATION_REQUIREMENTS = {
         setup_steps=[
             "Go to id.atlassian.com/manage-profile/security/api-tokens",
             "Click 'Create API token'",
-            "Name it (e.g., 'PromptFlow')",
+            "Name it (e.g., 'Sentric')",
             "Copy the token",
             "Paste in this format: your-email@example.com:your-api-token",
             "Note your Jira URL (e.g., yourcompany.atlassian.net)"
@@ -165,7 +165,7 @@ INTEGRATION_REQUIREMENTS = {
         setup_steps=[
             "Go to airtable.com/create/tokens",
             "Click 'Create new token'",
-            "Name it (e.g., 'PromptFlow')",
+            "Name it (e.g., 'Sentric')",
             "Add scopes: data.records:read, data.records:write, schema.bases:read",
             "Under 'Access', add the bases you want to access (or 'All current and future bases')",
             "Click 'Create token' and copy it"
@@ -199,7 +199,7 @@ INTEGRATION_REQUIREMENTS = {
         setup_steps=[
             "Go to app.sendgrid.com/settings/api_keys",
             "Click 'Create API Key'",
-            "Name it (e.g., 'PromptFlow')",
+            "Name it (e.g., 'Sentric')",
             "Choose 'Restricted Access' and enable 'Mail Send' → 'Full Access'",
             "Click 'Create & View' and copy the key (starts with SG.)"
         ],

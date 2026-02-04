@@ -1,5 +1,5 @@
 """
-PromptFlow Backend - FastAPI Application
+Sentric Backend - FastAPI Application
 """
 
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -1628,9 +1628,69 @@ async def execute_workflow_stream(project_id: str, request: Request):
         last_event_at = time.time()
         keepalive_interval_seconds = 25.0
 
+        # Create a run record for this execution
+        run_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        node_count = len(workflow_data.get("nodes", []))
+        run_name = f"Workflow Run ({node_count} nodes)"
+
+        try:
+            supabase_admin.table("runs").insert({
+                "id": run_id,
+                "project_id": project_id,
+                "name": run_name,
+                "status": "running",
+                "start_time": now,
+                "metadata": {"node_count": node_count},
+                "created_at": now
+            }).execute()
+        except Exception as e:
+            print(f"[execute/stream] Failed to create run record: {e}")
+            run_id = None  # Continue without logging if DB fails
+
+        step_counter = [0]  # Use list to allow mutation in nested function
+
         async def stream_callback(event: Dict[str, Any]):
-            """Callback for execution events."""
+            """Callback for execution events - also logs to runs table."""
             await event_queue.put(event)
+
+            # Log events to runs table
+            if run_id and event.get("type") == "node_status_change":
+                node_id = event.get("node_id")
+                status = event.get("status")
+                event_type = "node_start" if status == "executing" else "node_complete"
+
+                # Build payload with all available data
+                payload = {
+                    "node_id": node_id,
+                    "status": status
+                }
+                if event.get("tool_name"):
+                    payload["tool_name"] = event["tool_name"]
+                if event.get("label"):
+                    payload["label"] = event["label"]
+                if event.get("params"):
+                    payload["params"] = event["params"]
+                if event.get("result"):
+                    payload["result"] = event["result"]
+                if event.get("error"):
+                    payload["error"] = event["error"]
+
+                try:
+                    event_data = {
+                        "id": str(uuid.uuid4()),
+                        "run_id": run_id,
+                        "type": event_type,
+                        "payload": payload,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "step_number": step_counter[0]
+                    }
+                    supabase_admin.table("run_events").insert(event_data).execute()
+
+                    if status != "executing":
+                        step_counter[0] += 1
+                except Exception as e:
+                    print(f"[execute/stream] Failed to log run event: {e}")
 
         async def run_workflow():
             """Execute workflow in background."""
@@ -1696,6 +1756,22 @@ async def execute_workflow_stream(project_id: str, request: Request):
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }).execute()
 
+                # Update run status
+                if run_id:
+                    try:
+                        run_status = "completed" if status == "completed" else "failed"
+                        supabase_admin.table("runs").update({
+                            "status": run_status,
+                            "end_time": datetime.now(timezone.utc).isoformat(),
+                            "metadata": {
+                                "node_count": node_count,
+                                "successful_steps": successful_steps,
+                                "total_steps": total_steps
+                            }
+                        }).eq("id", run_id).execute()
+                    except Exception as e:
+                        print(f"[execute/stream] Failed to update run status: {e}")
+
                 await event_queue.put({
                     "type": "execution_complete",
                     "data": {
@@ -1705,6 +1781,15 @@ async def execute_workflow_stream(project_id: str, request: Request):
                     }
                 })
             except Exception as e:
+                # Update run status on error
+                if run_id:
+                    try:
+                        supabase_admin.table("runs").update({
+                            "status": "failed",
+                            "end_time": datetime.now(timezone.utc).isoformat()
+                        }).eq("id", run_id).execute()
+                    except:
+                        pass
                 await event_queue.put({"type": "error", "data": str(e)})
 
         # Start workflow execution in background
@@ -2101,6 +2186,137 @@ async def update_run(run_id: str, body: RunUpdate):
         supabase_admin.table("runs").update(update_data).eq("id", run_id).execute()
 
     return {"success": True, "run_id": run_id}
+
+
+@app.get("/api/runs/{run_id}/analysis")
+async def get_run_analysis(run_id: str):
+    """Get analysis findings for a run."""
+    # Verify run exists
+    run_result = supabase_admin.table("runs").select("id").eq("id", run_id).execute()
+    if not run_result.data:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Get findings
+    findings_result = supabase_admin.table("analysis_findings").select("*").eq(
+        "run_id", run_id
+    ).order("created_at").execute()
+
+    findings = [
+        {
+            "id": f["id"],
+            "severity": f.get("severity", "low"),
+            "category": f.get("category", "General"),
+            "description": f.get("description", ""),
+            "evidence": f.get("evidence", []),
+            "created_at": f.get("created_at")
+        }
+        for f in findings_result.data
+    ]
+
+    return {"findings": findings, "run_id": run_id}
+
+
+@app.post("/api/runs/{run_id}/analyze")
+async def analyze_run(run_id: str):
+    """Generate AI-powered analysis for a completed run."""
+    from google import genai
+    from google.genai import types
+
+    # Get run with events
+    run_result = supabase_admin.table("runs").select("*").eq("id", run_id).execute()
+    if not run_result.data:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = run_result.data[0]
+
+    # Get events
+    events_result = supabase_admin.table("run_events").select("*").eq(
+        "run_id", run_id
+    ).order("timestamp").execute()
+    events = events_result.data
+
+    if not events:
+        return {"findings": [], "message": "No events to analyze"}
+
+    # Build context for analysis
+    event_summary = []
+    for e in events:
+        payload = e.get("payload", {})
+        event_summary.append({
+            "type": e.get("type"),
+            "tool": payload.get("tool_name", "unknown"),
+            "status": payload.get("status"),
+            "has_error": bool(payload.get("error")),
+            "error": payload.get("error"),
+            "result_preview": str(payload.get("result", ""))[:200] if payload.get("result") else None
+        })
+
+    analysis_prompt = f"""Analyze this workflow execution and identify any issues, inefficiencies, or notable patterns.
+
+Run Status: {run.get('status')}
+Total Events: {len(events)}
+
+Events:
+{json.dumps(event_summary, indent=2)}
+
+Provide findings in this JSON format:
+{{
+  "findings": [
+    {{
+      "severity": "low|medium|high",
+      "category": "Performance|Error Handling|Data Quality|Security|Best Practice",
+      "description": "Brief description of the finding",
+      "evidence": ["Supporting detail 1", "Supporting detail 2"]
+    }}
+  ]
+}}
+
+Categories to consider:
+- Performance: Slow steps, unnecessary operations, optimization opportunities
+- Error Handling: Failed steps, missing error recovery, unhandled edge cases
+- Data Quality: Data validation issues, malformed outputs, missing data
+- Security: Sensitive data exposure, unsafe operations
+- Best Practice: Workflow structure, naming, documentation
+
+Only include meaningful findings. If the workflow executed perfectly with no issues, return an empty findings array.
+Respond with valid JSON only."""
+
+    try:
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
+        response = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=analysis_prompt,
+            config=types.GenerateContentConfig(temperature=0.3)
+        )
+
+        # Parse response
+        content = response.text
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0]
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0]
+
+        analysis = json.loads(content.strip())
+        findings = analysis.get("findings", [])
+
+        # Store findings in database
+        now = datetime.now(timezone.utc).isoformat()
+        for finding in findings:
+            supabase_admin.table("analysis_findings").insert({
+                "id": str(uuid.uuid4()),
+                "run_id": run_id,
+                "severity": finding.get("severity", "low"),
+                "category": finding.get("category", "General"),
+                "description": finding.get("description", ""),
+                "evidence": finding.get("evidence", []),
+                "created_at": now
+            }).execute()
+
+        return {"findings": findings, "run_id": run_id}
+
+    except Exception as e:
+        print(f"[analyze_run] Analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 # MCP Server Endpoints
